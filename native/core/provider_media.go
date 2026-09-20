@@ -87,6 +87,14 @@ func (d *Downloader) providerURLCandidates(raw string) []string {
 	return candidates
 }
 
+func (d *Downloader) preferredProviderURL(raw string) string {
+	candidates := d.providerURLCandidates(raw)
+	if len(candidates) == 0 {
+		return raw
+	}
+	return candidates[0]
+}
+
 func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (providerMedia, error) {
 	chapter := task.Chapter
 	chapter.Source = canonicalProviderSource(chapter.Source)
@@ -164,5 +172,6 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 		}
 		media.Playlist = playlist
 	}
+	media.URL = d.preferredProviderURL(media.URL)
 	return media, nil
 }
