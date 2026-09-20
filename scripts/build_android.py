@@ -32,7 +32,7 @@ with china_mirror_environment(environment, options.cn_mirrors) as env, mirrored_
     subprocess.run([sys.executable, str(root / 'scripts' / 'build_native.py'), '--platform', 'android', *abi_args, *variant.arguments],
                    cwd=root, env=env, check=True)
     subprocess.run([flutter, 'pub', 'get', '--enforce-lockfile'], cwd=root, env=env, check=True)
-    build_args = [flutter, 'build', 'apk', '--release', '--split-per-abi', '--no-pub', *variant.flutter_arguments]
+    build_args = [flutter, 'build', 'apk', '--release', '--split-per-abi', *variant.flutter_arguments]
     if options.abi:
         targets = {'arm64-v8a': 'android-arm64', 'armeabi-v7a': 'android-arm', 'x86_64': 'android-x64'}
         build_args += ['--target-platform', ','.join(targets[abi] for abi in options.abi)]

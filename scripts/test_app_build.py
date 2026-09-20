@@ -88,6 +88,17 @@ class AppBuildTests(unittest.TestCase):
                     self.assertIn('--dart-define=ALL_SOURCES=' + str(enabled).lower(), flutter)
                     self.assertIn('core.buildAllSources=' + str(enabled).lower(), BuildVariant(enabled).linker_flags)
 
+    def test_android_release_build_regenerates_release_plugin_registrant(self):
+        arguments = [str(Path(__file__).resolve().parent / 'build_android.py')]
+        with mock.patch.object(sys, 'argv', arguments), \
+                mock.patch.dict(os.environ, {'PATH': '/tools'}, clear=True), \
+                mock.patch('shutil.which', return_value='/tools/flutter'), \
+                mock.patch('subprocess.run') as run:
+            runpy.run_path(arguments[0], run_name='__main__')
+
+        flutter = next(call.args[0] for call in run.call_args_list if 'build' in call.args[0])
+        self.assertNotIn('--no-pub', flutter)
+
 
 if __name__ == '__main__':
     unittest.main()
