@@ -115,6 +115,13 @@ func huangguoBrowserHeaders(request *http.Request) fhttp.Header {
 		"accept-language":           {"zh-CN,zh;q=0.9"},
 		fhttp.HeaderOrderKey:        {"sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "upgrade-insecure-requests", "user-agent", "accept", "sec-fetch-site", "sec-fetch-mode", "sec-fetch-user", "sec-fetch-dest", "referer", "accept-encoding", "accept-language", "cookie"},
 	}
+	if mode := request.Header.Get("Sec-Fetch-Mode"); mode != "" && mode != "navigate" {
+		headers["accept"] = []string{firstNonEmpty(request.Header.Get("Accept"), "*/*")}
+		headers["sec-fetch-mode"] = []string{mode}
+		headers["sec-fetch-dest"] = []string{firstNonEmpty(request.Header.Get("Sec-Fetch-Dest"), "empty")}
+		delete(headers, "upgrade-insecure-requests")
+		delete(headers, "sec-fetch-user")
+	}
 	for key, values := range request.Header {
 		lower := strings.ToLower(key)
 		if _, fixed := headers[lower]; fixed || lower == "host" || lower == "connection" {

@@ -11,6 +11,7 @@ class SearchInput extends StatefulWidget {
     required this.onSearch,
     this.onChanged,
     this.suggestions,
+    this.onCancel,
     this.autofocus = false,
   });
   final TextEditingController controller;
@@ -18,6 +19,7 @@ class SearchInput extends StatefulWidget {
   final ValueChanged<String> onSearch;
   final ValueChanged<String>? onChanged;
   final Future<List<String>> Function(String)? suggestions;
+  final VoidCallback? onCancel;
   final bool autofocus;
   @override
   State<SearchInput> createState() => _SearchInputState();
@@ -33,6 +35,7 @@ class _SearchInputState extends State<SearchInput> {
 
   void _cancel() {
     _timer?.cancel();
+    widget.onCancel?.call();
     _generation++;
     if (_pending != null && !_pending!.isCompleted) {
       _pending!.complete(const []);

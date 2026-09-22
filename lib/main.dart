@@ -16,6 +16,8 @@ import 'local_store.dart';
 import 'profiles_screen.dart';
 import 'media_library.dart';
 import 'package_smoke.dart';
+import 'lan_controller.dart';
+import 'player_screen.dart';
 
 Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -43,6 +45,7 @@ class AppBootstrap extends StatefulWidget {
 class _AppBootstrapState extends State<AppBootstrap>
     with WidgetsBindingObserver {
   final repository = NativeRepository();
+  final navigator = GlobalKey<NavigatorState>();
   LocalStore? store;
   Object? error;
   AppDevice device = const AppDevice();
@@ -50,6 +53,8 @@ class _AppBootstrapState extends State<AppBootstrap>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    LanController.current?.dispose();
+    LanController.current = null;
     MediaLibrary.current?.dispose();
     MediaLibrary.current = null;
     store?.dispose();
@@ -96,6 +101,53 @@ class _AppBootstrapState extends State<AppBootstrap>
           store = LocalStore(preferences);
           repository.access = store;
           MediaLibrary.attach(repository, store!);
+          LanController.current?.dispose();
+          final link = LanController(
+            repository,
+            store!,
+            kind: device.television
+                ? 'tv'
+                : Platform.isWindows
+                ? 'computer'
+                : 'phone',
+          );
+          LanController.current = link;
+          link.openPlayback = (request) async {
+            final epoch = request.profileEpoch;
+            if (request.cancelled ||
+                !mounted ||
+                store!.locked ||
+                !link.receiving ||
+                store!.profileEpoch != epoch ||
+                !store!.allowsSource(request.detail.drama.source)) {
+              throw StateError('当前用户不能接收播放');
+            }
+            await link.playbackHost?.stop();
+            if (request.cancelled ||
+                !mounted ||
+                store!.locked ||
+                store!.profileEpoch != epoch ||
+                !link.receiving) {
+              throw StateError('播放接收已取消');
+            }
+            final navigation = navigator.currentState;
+            if (navigation == null) throw StateError('接收设备界面尚未就绪');
+            unawaited(
+              navigation.pushAndRemoveUntil<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => PlayerScreen(
+                    detail: request.detail,
+                    initialIndex: request.index,
+                    initialPosition: request.position,
+                    repository: repository,
+                    store: store!,
+                    handoff: request,
+                  ),
+                ),
+                (route) => route.isFirst,
+              ),
+            );
+          };
         });
       }
     } catch (failure) {
@@ -115,6 +167,7 @@ class _AppBootstrapState extends State<AppBootstrap>
     onRetry: _initialize,
     television: device.television,
     version: device.version,
+    navigatorKey: navigator,
   );
 }
 
@@ -127,6 +180,7 @@ class DuanjuApp extends StatelessWidget {
     this.onRetry,
     this.television = false,
     this.version = appVersion,
+    this.navigatorKey,
   });
   final AppRepository repository;
   final LocalStore? store;
@@ -134,13 +188,16 @@ class DuanjuApp extends StatelessWidget {
   final VoidCallback? onRetry;
   final bool television;
   final String version;
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
-  Widget build(BuildContext context) => store == null
-      ? _application()
-      : AnimatedBuilder(animation: store!, builder: (_, _) => _application());
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: Listenable.merge([store]),
+    builder: (_, _) => _application(),
+  );
 
   Widget _application() => MaterialApp(
+    navigatorKey: navigatorKey,
     title: appName,
     debugShowCheckedModeBanner: false,
     locale: const Locale('zh', 'CN'),

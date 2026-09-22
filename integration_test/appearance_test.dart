@@ -82,6 +82,8 @@ void main() {
     await capture('appearance-light-favorites');
     await tester.tap(find.byKey(const ValueKey('bottom-nav-0')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('toggle-search')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(TextField).first);
     await tester.pump(const Duration(milliseconds: 700));
     FocusManager.instance.primaryFocus?.unfocus();

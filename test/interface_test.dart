@@ -92,19 +92,25 @@ void main() {
     final store = await localStore();
     await tester.pumpWidget(DuanjuApp(repository: repository, store: store));
     await tester.pumpAndSettle();
-    for (final source in SourceSite.values) {
-      final chip = find.widgetWithText(ChoiceChip, source.name);
-      await tester.ensureVisible(chip);
-      await tester.tap(chip);
+    Future<void> select(String name) async {
+      if (SourceGroup.fromSources(SourceSite.values).length <= 1) return;
+      await tester.tap(find.byKey(const ValueKey('source-switch')));
       await tester.pumpAndSettle();
-      if (source.id == 'huangdou') {
+      await tester.tap(find.text(name).last);
+      await tester.pumpAndSettle();
+    }
+
+    for (final group in SourceGroup.fromSources(SourceSite.values)) {
+      await select(group.name);
+      if (group.id == 'huangdou') {
         expect(find.text('会员合成剧'), findsNothing);
-        await tester.tap(find.text('VIP：隐藏'));
+        await tester.tap(find.byTooltip('VIP：隐藏'));
         await tester.pumpAndSettle();
         expect(find.text('会员合成剧'), findsOneWidget);
       } else {
-        expect(find.textContaining('VIP：'), findsNothing);
-        expect(find.text('会员合成剧'), findsOneWidget);
+        expect(find.byTooltip('VIP：隐藏'), findsNothing);
+        expect(find.byTooltip('VIP：显示'), findsNothing);
+        expect(find.text('会员合成剧'), findsWidgets);
       }
     }
     if (!allSourcesEnabled) {
@@ -113,18 +119,12 @@ void main() {
       }
       return;
     }
-    final huangdou = find.widgetWithText(ChoiceChip, '黄豆');
-    await tester.ensureVisible(huangdou);
-    await tester.tap(huangdou);
-    await tester.pumpAndSettle();
-    expect(find.text('VIP：显示'), findsOneWidget);
-    await tester.tap(find.text('VIP：显示'));
+    await select('黄豆');
+    expect(find.byTooltip('VIP：显示'), findsOneWidget);
+    await tester.tap(find.byTooltip('VIP：显示'));
     await tester.pumpAndSettle();
     expect(store.hideVip, isTrue);
-    final hongguo = find.widgetWithText(ChoiceChip, '红果');
-    await tester.ensureVisible(hongguo);
-    await tester.tap(hongguo);
-    await tester.pumpAndSettle();
+    await select('红果');
     expect(find.text('会员合成剧'), findsOneWidget);
     expect(find.textContaining('VIP：'), findsNothing);
   });

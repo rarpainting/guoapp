@@ -7,6 +7,8 @@ import android.os.Bundle
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.net.ConnectivityManager
+import android.net.Uri
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
@@ -29,6 +31,16 @@ class MainActivity : FlutterActivity() {
                         packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
                     val version = packageManager.getPackageInfo(packageName, 0).versionName
                     result.success(mapOf("television" to television, "version" to version))
+                } else if (call.method == "systemProxy") {
+                    val connection = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                    val proxy = connection.defaultProxy
+                    val host = proxy?.host.orEmpty()
+                    val address = if (host.isNotEmpty() && (proxy?.port ?: 0) > 0) {
+                        "http://${if (host.contains(':')) "[$host]" else host}:${proxy!!.port}"
+                    } else ""
+                    result.success(mapOf("http" to address, "https" to address,
+                        "bypass" to (proxy?.exclusionList?.toList() ?: emptyList<String>()),
+                        "pac" to (proxy != null && proxy.pacFileUrl != Uri.EMPTY)))
                 } else {
                     result.notImplemented()
                 }

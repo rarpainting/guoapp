@@ -28,7 +28,8 @@ func (backoff *requestBackoff) Error() string {
 	if backoff.reason != "" {
 		reason = "：" + backoff.reason
 	}
-	return fmt.Sprintf("%s HTTP %d%s，已暂停该域名请求，%s 后可重试", backoff.host, backoff.status, reason, backoff.until.Format("15:04:05"))
+	seconds := max(1, int(time.Until(backoff.until).Seconds()+0.999))
+	return fmt.Sprintf("%s HTTP %d%s，请在 %d 秒后重试", backoff.host, backoff.status, reason, seconds)
 }
 
 func catalogResponseBlockReason(response *http.Response, body []byte) string {
@@ -256,6 +257,7 @@ func (d *Downloader) doPreparedCatalogRequest(request *http.Request, timeout tim
 		return nil, err
 	}
 	d.limiter.observe(request, response)
+	observeSourceResponse(request.Context(), response)
 	response.Body = &limitedResponseBody{ReadCloser: response.Body, release: func() { cancel(); release() }}
 	return response, nil
 }

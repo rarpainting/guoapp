@@ -38,6 +38,7 @@ type nativeDownloadFileState struct {
 }
 
 func (manager *nativeDownloads) transferMedia(ctx context.Context, job nativeDownloadJob, media providerMedia) (nativeDownloadResult, error) {
+	ctx = providerMediaContext(ctx, media.credentials)
 	bundle := nativeDownloadBundle{quality: media.Quality, playlists: map[string][]byte{}}
 	parsed, err := url.Parse(media.URL)
 	if err != nil || !isProviderHTTPMediaURL(media.URL) {
@@ -54,7 +55,7 @@ func (manager *nativeDownloads) transferMedia(ctx context.Context, job nativeDow
 	} else {
 		bundle.assets = []nativeDownloadAsset{{address: media.URL, name: entry}}
 	}
-	directory := filepath.Join(manager.root, job.ID)
+	directory := manager.jobDirectory(job)
 	identity := entry + "\x00" + media.URL + "\x00" + hex.EncodeToString(media.CENCKey) + "\x00" + strconv.Itoa(bundle.quality)
 	if hls {
 		for _, asset := range bundle.assets {
@@ -193,7 +194,7 @@ func (manager *nativeDownloads) downloadFileAttempt(ctx context.Context, address
 	}
 	client := *manager.engine.downloader.client
 	client.Timeout = 0
-	response, err := client.Do(request)
+	response, err := manager.engine.downloader.doMediaRequestWithClient(request, &client)
 	if err != nil {
 		return 0, false, errors.New("下载连接中断，请检查网络后继续")
 	}
@@ -300,23 +301,5 @@ func (manager *nativeDownloads) downloadFileAttempt(ctx context.Context, address
 }
 
 func (manager *nativeDownloads) downloadPlaylist(ctx context.Context, address, referer string) (string, string, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
-	if err != nil || !isProviderHTTPMediaURL(address) {
-		return "", "", errors.New("播放列表地址无效")
-	}
-	request.Header.Set("User-Agent", userAgent)
-	request.Header.Set("Referer", referer)
-	response, err := manager.engine.downloader.client.Do(request)
-	if err != nil {
-		return "", "", errors.New("无法下载播放列表，请重试")
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return "", "", nativeDownloadError(response.StatusCode)
-	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, 4<<20+1))
-	if err != nil || len(data) > 4<<20 {
-		return "", "", errors.New("播放列表过大或读取失败")
-	}
-	return string(data), response.Request.URL.String(), nil
+	return manager.engine.downloader.fetchMediaPlaylist(ctx, address, referer)
 }

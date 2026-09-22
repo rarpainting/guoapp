@@ -51,7 +51,7 @@ class BackgroundDownloads {
       serviceId: 2406,
       serviceTypes: [ForegroundServiceTypes.dataSync],
       notificationTitle: appName,
-      notificationText: '正在准备下载',
+      notificationText: '正在准备后台任务',
       notificationButtons: [
         const NotificationButton(id: 'pause', text: '暂停下载'),
       ],
@@ -106,7 +106,7 @@ class DownloadTaskHandler extends TaskHandler {
       await FlutterForegroundTask.updateService(
         notificationTitle: appName,
         notificationText: work > 0
-            ? '正在处理本地媒体'
+            ? '正在更新站源或处理本地媒体'
             : active.isEmpty
             ? '下载已完成或暂停'
             : '${active.length} 集下载中 · ${(bytes / 1048576).toStringAsFixed(1)} MB',

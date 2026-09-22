@@ -12,6 +12,10 @@ import 'background_downloads.dart';
 import 'local_store.dart';
 import 'profiles_screen.dart';
 import 'app_build.dart';
+import 'sources_screen.dart';
+import 'widgets.dart';
+import 'resource_settings_screen.dart';
+import 'lan_screen.dart';
 
 String storageSize(int bytes) {
   if (bytes < 0) return '暂不可用';
@@ -64,7 +68,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
-    if (selected != null) await widget.store.setThemeMode(selected);
+    if (selected != null && mounted) {
+      await saveUserChange(context, () => widget.store.setThemeMode(selected));
+    }
   }
 
   Future<void> _backup(bool restore) async {
@@ -137,6 +143,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
             padding: const EdgeInsets.all(16),
             children: [
               ListTile(
+                key: const ValueKey('lan-settings'),
+                leading: const Icon(Icons.devices_rounded),
+                title: const Text('设备互联'),
+                subtitle: const Text('局域网自动同步追剧与推送播放'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => openLanSync(context),
+              ),
+              if (widget.repository.supportsSourceManagement)
+                ListTile(
+                  leading: const Icon(Icons.dns_outlined),
+                  title: const Text('站源管理'),
+                  subtitle: const Text('独立更新、连接与播放检测'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => SourcesScreen(
+                        repository: widget.repository,
+                        store: widget.store,
+                      ),
+                    ),
+                  ),
+                ),
+              ListTile(
                 key: const ValueKey('theme-setting'),
                 leading: const Icon(Icons.palette_outlined),
                 title: const Text('外观主题'),
@@ -157,6 +187,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               if (widget.store.canDownload)
                 ListTile(
+                  leading: const Icon(Icons.download_outlined),
+                  title: const Text('下载偏好'),
+                  subtitle: Text(widget.store.downloadPreferences.qualityLabel),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          DownloadPreferencesScreen(store: widget.store),
+                    ),
+                  ),
+                ),
+              if (widget.store.canDownload)
+                ListTile(
                   leading: const Icon(Icons.folder_outlined),
                   title: const Text('下载目录与空间'),
                   subtitle: const Text('查看存储用量、迁移已下载文件'),
@@ -171,6 +215,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               if (widget.store.profile.admin) ...[
+                ListTile(
+                  leading: const Icon(Icons.settings_ethernet_rounded),
+                  title: const Text('网络与资源'),
+                  subtitle: const Text('代理、目录请求间隔、下载并发与站源目录'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => ResourceSettingsScreen(
+                        repository: widget.repository,
+                        store: widget.store,
+                      ),
+                    ),
+                  ),
+                ),
                 SwitchListTile(
                   value: widget.store.autoExport,
                   title: const Text('下载完成后自动导出 Emby'),
@@ -196,7 +255,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   value: widget.store.exportPosters,
                   title: const Text('同时导出海报文件'),
                   subtitle: const Text('默认只写海报 URL。源站海报需要解密或外部读取失败时可开启。'),
-                  onChanged: _busy ? null : widget.store.setExportPosters,
+                  onChanged: _busy
+                      ? null
+                      : (value) => saveUserChange(
+                          context,
+                          () => widget.store.setExportPosters(value),
+                        ),
                 ),
                 ListTile(
                   leading: const Icon(Icons.backup_outlined),

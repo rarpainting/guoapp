@@ -122,13 +122,17 @@ func (engine *nativeEngine) moveDownloads(ctx context.Context, parent string) er
 	}
 	parent = resolved
 	engine.mu.Lock()
-	if engine.work["media"] {
+	if engine.work["media"] || engine.work["mergeQueue"] || engine.work["mergeCleanup"] {
 		engine.mu.Unlock()
 		return errors.New("请等待本地媒体处理完成后再迁移")
 	}
 	defer engine.mu.Unlock()
 	target := filepath.Join(filepath.Clean(parent), "zhenguojian-downloads")
 	manager.mu.Lock()
+	if manager.loadErr != nil {
+		manager.mu.Unlock()
+		return errors.New("下载记录无法读取，已停止迁移并保留原索引和文件；请先恢复下载记录")
+	}
 	if manager.closed || manager.moving {
 		manager.mu.Unlock()
 		return errors.New("下载目录正在处理，请稍后重试")
@@ -174,13 +178,16 @@ func (engine *nativeEngine) moveDownloads(ctx context.Context, parent string) er
 		_ = os.RemoveAll(target)
 		return errors.New("文件迁移未完成，原文件已保留，请检查空间与目录权限")
 	}
+	if err := ctx.Err(); err != nil {
+		_ = os.RemoveAll(target)
+		return err
+	}
 	data, _ := json.Marshal(map[string]string{"directory": target})
 	if err := nativeDownloadWrite(filepath.Join(engine.directory, "download-location.json"), data); err != nil {
 		_ = os.RemoveAll(target)
 		return errors.New("保存下载目录失败，原文件已保留")
 	}
 	manager.root = target
-	manager.loadErr = nil
 	_ = os.RemoveAll(source)
 	return nil
 }
@@ -192,7 +199,7 @@ func (engine *nativeEngine) workLease(id, command string) (int, error) {
 		engine.work = map[string]bool{}
 	}
 	if id != "" {
-		if id != "media" && id != "storage" {
+		if id != "media" && id != "storage" && id != "mergeQueue" && id != "mergeCleanup" {
 			return 0, errors.New("无效的本地任务")
 		}
 		if command != "start" && command != "end" {
@@ -202,7 +209,8 @@ func (engine *nativeEngine) workLease(id, command string) (int, error) {
 		manager.mu.Lock()
 		defer manager.mu.Unlock()
 		if command == "start" {
-			if engine.work[id] || manager.moving {
+			if engine.work[id] || manager.moving || id == "media" && engine.work["mergeCleanup"] ||
+				id == "mergeCleanup" && engine.work["media"] {
 				return 0, errors.New("已有本地任务正在运行，请稍后重试")
 			}
 			engine.work[id] = true
@@ -211,5 +219,5 @@ func (engine *nativeEngine) workLease(id, command string) (int, error) {
 		}
 		manager.mediaBusy = engine.work["media"]
 	}
-	return len(engine.work), nil
+	return len(engine.work) + len(engine.sourceTasks), nil
 }

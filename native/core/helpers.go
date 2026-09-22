@@ -1,8 +1,6 @@
 package core
 
 import (
-	"errors"
-
 	"net/url"
 
 	"regexp"
@@ -20,8 +18,13 @@ func publicError(err error) error {
 	if err == nil {
 		return nil
 	}
-	return errors.New(redactErrorString(err.Error()))
+	return redactedError{cause: err}
 }
+
+type redactedError struct{ cause error }
+
+func (err redactedError) Error() string { return redactErrorString(err.cause.Error()) }
+func (err redactedError) Unwrap() error { return err.cause }
 
 func redactErrorString(s string) string {
 	return rePublicURL.ReplaceAllStringFunc(s, func(raw string) string {

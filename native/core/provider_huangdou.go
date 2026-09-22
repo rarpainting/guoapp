@@ -284,19 +284,23 @@ func huangdouKey(rid string) ([]byte, error) {
 }
 
 func huangdouDecode(blob, key []byte) (any, error) {
-	if len(blob) < aes.BlockSize*2 {
+	if len(blob) > providerMaxBodyBytes {
+		return nil, errors.New("黄豆响应过大")
+	}
+	if json.Valid(blob) {
 		var direct any
-		if err := json.Unmarshal(blob, &direct); err == nil {
-			return direct, nil
+		decoder := json.NewDecoder(bytes.NewReader(blob))
+		decoder.UseNumber()
+		if err := decoder.Decode(&direct); err != nil {
+			return nil, err
 		}
+		return direct, nil
+	}
+	if len(blob) < aes.BlockSize*2 {
 		return nil, fmt.Errorf("huangdou response too short")
 	}
 	plain, err := aesCBCDecrypt(blob[aes.BlockSize:], key, blob[:aes.BlockSize])
 	if err != nil {
-		var direct any
-		if jsonErr := json.Unmarshal(blob, &direct); jsonErr == nil {
-			return direct, nil
-		}
 		return nil, err
 	}
 	if len(plain) >= 2 && plain[0] == 0x1f && plain[1] == 0x8b {
@@ -314,6 +318,9 @@ func huangdouDecode(blob, key []byte) (any, error) {
 		}
 	}
 	var decoded any
+	if !json.Valid(plain) {
+		return nil, errors.New("黄豆响应格式异常")
+	}
 	decoder := json.NewDecoder(bytes.NewReader(plain))
 	decoder.UseNumber()
 	if err := decoder.Decode(&decoded); err != nil {

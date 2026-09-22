@@ -118,15 +118,18 @@ void main() {
           DuanjuApp(repository: repository, store: store, television: true),
         );
         await tester.pumpAndSettle();
-        focusRemote(
-          tester,
-          find.byKey(ValueKey('tv-source-${SourceSite.values.first.id}')),
-        );
-        await tester.pumpAndSettle();
         if (SourceSite.values.length > 1) {
-          await press(tester, LogicalKeyboardKey.arrowRight);
+          final switcher = find.byKey(const ValueKey('source-switch'));
+          final title = find
+              .descendant(of: switcher, matching: find.byType(Text))
+              .first;
+          Focus.of(tester.element(title)).requestFocus();
+          await tester.pumpAndSettle();
+          await press(tester, LogicalKeyboardKey.select);
+          await press(tester, LogicalKeyboardKey.arrowDown);
+          await press(tester, LogicalKeyboardKey.arrowDown);
+          await press(tester, LogicalKeyboardKey.select);
         }
-        await press(tester, LogicalKeyboardKey.select);
         expect(
           repository.requests.last,
           SourceSite.values.length > 1 ? SourceSite.values[1].id : 'hongguo',

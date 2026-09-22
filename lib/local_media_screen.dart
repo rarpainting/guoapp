@@ -10,6 +10,7 @@ import 'media_library.dart';
 import 'models.dart';
 import 'player_screen.dart';
 import 'settings_screen.dart';
+import 'merge_queue_screen.dart';
 
 class LocalMediaScreen extends StatefulWidget {
   const LocalMediaScreen({
@@ -60,25 +61,38 @@ class _LocalMediaScreenState extends State<LocalMediaScreen> {
   }
 
   Future<void> _create(bool merge) async {
+    if (merge) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => MergeQueueScreen(
+            library: library,
+            repository: widget.repository,
+            store: widget.store,
+            addOnOpen: true,
+          ),
+        ),
+      );
+      if (mounted) await _refresh();
+      return;
+    }
     final groups = <String, List<DownloadJob>>{};
     for (final job in _jobs) {
-      groups.putIfAbsent(job.drama.id, () => []).add(job);
+      (groups[job.drama.id] ??= []).add(job);
     }
     final selected = await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
-        title: Text(merge ? '合并哪部剧？' : '导出哪部剧到 Emby？'),
+        title: const Text('导出哪部剧到 Emby？'),
         children: [
-          if (!merge && _jobs.isNotEmpty)
+          if (_jobs.isNotEmpty)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, '*'),
               child: Text('全部已下载 · ${_jobs.length} 集'),
             ),
           for (final entry in groups.entries)
             SimpleDialogOption(
-              onPressed: merge && entry.value.length < 2
-                  ? null
-                  : () => Navigator.pop(context, entry.key),
+              onPressed: () => Navigator.pop(context, entry.key),
               child: Text(
                 '${entry.value.first.drama.title} · 已下载 ${entry.value.length} 集',
               ),
@@ -90,39 +104,12 @@ class _LocalMediaScreenState extends State<LocalMediaScreen> {
     );
     if (selected == null || !mounted) return;
     final jobs = selected == '*' ? _jobs : groups[selected]!;
-    if (merge) {
-      final yes = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text('合并已下载的 ${jobs.length} 集？'),
-          content: Text(
-            '按集数顺序合并，保留原分集。优先保留码流，仅在格式不一致时将少数分集转换为多数格式。\n\n'
-            '${jobs.first.drama.episodes > jobs.length ? '这部剧共有 ${jobs.first.drama.episodes} 集，当前尚未全部下载。' : '合并完成后可直接播放成品。'}',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('开始合并'),
-            ),
-          ],
-        ),
-      );
-      if (yes != true || !mounted) return;
-    }
     setState(() {
       _error = null;
-      _merged = merge;
+      _merged = false;
     });
     try {
-      if (merge) {
-        await library.merge(jobs);
-      } else {
-        await library.exportJobs(jobs);
-      }
+      await library.exportJobs(jobs);
       if (mounted) await _refresh();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -165,7 +152,7 @@ class _LocalMediaScreenState extends State<LocalMediaScreen> {
       builder: (context) => AlertDialog(
         title: const Text('删除此媒体文件？'),
         content: Text(
-          '下载的原分集会保留。${item.merged ? '' : '此分集不再自动导出，需要时可手动重新导出。'}',
+          '将删除此成品文件。已单独保存的原分集不受影响。${item.merged || item.special ? '' : '此分集不再自动导出，需要时可手动重新导出。'}',
         ),
         actions: [
           TextButton(
@@ -182,6 +169,20 @@ class _LocalMediaScreenState extends State<LocalMediaScreen> {
     if (yes != true || !mounted) return;
     try {
       await library.remove(item);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _exportMerged(LocalMediaItem item) async {
+    try {
+      await library.exportMerged(item);
+      if (mounted) {
+        setState(() {
+          _merged = false;
+          _error = null;
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
@@ -225,7 +226,9 @@ class _LocalMediaScreenState extends State<LocalMediaScreen> {
                     onSelected: (_) => setState(() => _merged = false),
                   ),
                   FilledButton.icon(
-                    onPressed: library.busy ? null : () => _create(_merged),
+                    onPressed: library.busy && !_merged
+                        ? null
+                        : () => _create(_merged),
                     icon: Icon(_merged ? Icons.merge : Icons.output),
                     label: Text(_merged ? '合并已下载分集' : '导出已下载分集'),
                   ),
@@ -310,7 +313,11 @@ class _LocalMediaScreenState extends State<LocalMediaScreen> {
                                 ),
                                 const SizedBox(height: 6),
                                 Text(
-                                  '${item.merged ? '已合并 ${item.episodes.length} 集' : '第 ${item.episodes.first} 集'} · ${storageSize(item.bytes)}',
+                                  '${item.merged
+                                      ? '已合并 ${item.episodes.length} 集'
+                                      : item.special
+                                      ? '特别篇 ${item.specialNumber} · 第 ${item.episodes.first}–${item.episodes.last} 集'
+                                      : '第 ${item.episodes.first} 集'} · ${storageSize(item.bytes)}',
                                 ),
                                 if (item.merged)
                                   Text(
@@ -318,6 +325,14 @@ class _LocalMediaScreenState extends State<LocalMediaScreen> {
                                     style: Theme.of(
                                       context,
                                     ).textTheme.bodySmall,
+                                  ),
+                                if (item.merged)
+                                  TextButton.icon(
+                                    onPressed: library.busy
+                                        ? null
+                                        : () => _exportMerged(item),
+                                    icon: const Icon(Icons.output_rounded),
+                                    label: const Text('导出到 Emby 特别篇'),
                                   ),
                                 Row(
                                   children: [
@@ -388,10 +403,23 @@ class _LocalFileRepository extends AppRepository {
     String source, {
     int page = 1,
     String query = '',
+    String category = '',
     bool force = false,
-  }) => parent.catalog(source, page: page, query: query, force: force);
+  }) => parent.catalog(
+    source,
+    page: page,
+    query: query,
+    category: category,
+    force: force,
+  );
   @override
-  Future<CatalogPage> cached(String source) => parent.cached(source);
+  Future<CatalogPage> cached(String source, {String category = ''}) =>
+      parent.cached(source, category: category);
+  @override
+  Future<List<CatalogCategory>> categories(
+    String source, {
+    bool force = false,
+  }) => parent.categories(source, force: force);
   @override
   Future<String> cover(Drama drama, {bool force = false}) =>
       parent.cover(drama, force: force);

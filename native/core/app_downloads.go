@@ -30,11 +30,14 @@ type nativeDownloadJob struct {
 	Quality       int         `json:"quality"`
 	ActualQuality int         `json:"actualQuality"`
 	State         string      `json:"state"`
+	Archived      bool        `json:"archived,omitempty"`
+	Folder        string      `json:"folder,omitempty"`
 	Bytes         int64       `json:"bytes"`
 	Total         int64       `json:"total"`
 	Progress      float64     `json:"progress"`
 	Error         string      `json:"error,omitempty"`
 	Created       int64       `json:"created"`
+	Revision      int64       `json:"revision,omitempty"`
 }
 
 type nativeDownloadRecord struct {
@@ -50,18 +53,20 @@ type nativeDownloadResult struct {
 }
 
 type nativeDownloads struct {
-	mu        sync.Mutex
-	root      string
-	engine    *nativeEngine
-	jobs      map[string]*nativeDownloadRecord
-	active    map[string]context.CancelFunc
-	closed    bool
-	moving    bool
-	mediaBusy bool
-	loadErr   error
-	workers   sync.WaitGroup
-	lastSaved time.Time
-	resolve   func(context.Context, nativeDownloadJob) (providerMedia, error)
+	mu          sync.Mutex
+	root        string
+	engine      *nativeEngine
+	jobs        map[string]*nativeDownloadRecord
+	active      map[string]context.CancelFunc
+	closed      bool
+	moving      bool
+	mediaBusy   bool
+	loadErr     error
+	workers     sync.WaitGroup
+	lastSaved   time.Time
+	concurrency int
+	bySource    bool
+	resolve     func(context.Context, nativeDownloadJob) (providerMedia, error)
 }
 
 func nativeDownloadID(drama string, episode int) string {
@@ -69,9 +74,29 @@ func nativeDownloadID(drama string, episode int) string {
 	return hex.EncodeToString(hash[:16])
 }
 
+func nativeDownloadVersion(job nativeDownloadJob) string {
+	version := fmt.Sprintf("%d-%d-%d", job.Created, job.Bytes, job.ActualQuality)
+	if job.Revision > 0 {
+		version += "-" + strconv.FormatInt(job.Revision, 10)
+	}
+	return version
+}
+
+func (manager *nativeDownloads) unarchivedCountLocked() int {
+	count := 0
+	for _, job := range manager.jobs {
+		if !job.Archived {
+			count++
+		}
+	}
+	return count
+}
+
 func newNativeDownloads(engine *nativeEngine) *nativeDownloads {
 	manager := &nativeDownloads{root: nativeDownloadLocation(engine.directory), engine: engine,
 		jobs: map[string]*nativeDownloadRecord{}, active: map[string]context.CancelFunc{}}
+	settings := engine.resourceSettings()
+	manager.concurrency, manager.bySource = settings.DownloadConcurrency, settings.DownloadBySource
 	manager.resolve = func(ctx context.Context, job nativeDownloadJob) (providerMedia, error) {
 		return engine.downloader.resolveProviderMedia(ctx, Task{
 			DramaID: job.Drama.ID, DramaTitle: job.Drama.Title, Chapter: job.Chapter, Index: job.Index})
@@ -89,28 +114,41 @@ func (manager *nativeDownloads) load() error {
 	if os.IsNotExist(err) {
 		return nil
 	}
-	if err != nil || info.Size() > 32<<20 {
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 32<<20 {
 		return errors.New("无法读取下载记录，原文件已保留")
 	}
 	data, err := os.ReadFile(path)
 	var records []*nativeDownloadRecord
-	if err != nil || json.Unmarshal(data, &records) != nil {
+	if err != nil || json.Unmarshal(data, &records) != nil || records == nil {
 		return errors.New("下载记录无法解析，原文件已保留")
 	}
+	seen := map[string]bool{}
 	for _, record := range records {
-		if record == nil || record.Index < 1 || record.ID != nativeDownloadID(record.Drama.ID, record.Index) {
-			continue
+		if record == nil || record.Index < 1 || record.ID != nativeDownloadID(record.Drama.ID, record.Index) || seen[record.ID] {
+			return errors.New("下载记录条目无效，原索引和文件已保留")
+		}
+		seen[record.ID] = true
+		if record.Folder != "" && record.Folder != record.Drama.Source+"/"+record.ID {
+			return errors.New("下载目录记录无效，原文件已保留")
 		}
 		if record.File != "" && record.File != "media.mp4" && record.File != "index.m3u8" {
-			continue
+			return errors.New("下载记录文件信息无效，原索引和文件已保留")
 		}
+		switch record.State {
+		case "removing", "downloading", "queued", "paused", "failed", "completed":
+		default:
+			return errors.New("下载记录状态无效，原索引和文件已保留")
+		}
+	}
+	for _, record := range records {
+		record.Drama = migrateNativeDrama(record.Drama)
 		if !nativeDownloadAvailable(record.nativeDownloadJob) {
 			manager.jobs[record.ID] = record
 			continue
 		}
 		switch record.State {
 		case "removing":
-			if err := os.RemoveAll(filepath.Join(manager.root, record.ID)); err != nil {
+			if err := os.RemoveAll(manager.jobDirectory(record.nativeDownloadJob)); err != nil {
 				return err
 			}
 			continue
@@ -150,6 +188,9 @@ func nativeDownloadWrite(path string, data []byte) error {
 }
 
 func (manager *nativeDownloads) saveLocked() error {
+	if manager.loadErr != nil {
+		return manager.loadErr
+	}
 	records := make([]nativeDownloadRecord, 0, len(manager.jobs))
 	for _, job := range manager.jobs {
 		records = append(records, *job)
@@ -158,6 +199,9 @@ func (manager *nativeDownloads) saveLocked() error {
 	data, err := json.Marshal(records)
 	if err != nil {
 		return err
+	}
+	if len(data) > 32<<20 {
+		return errors.New("下载记录超过保存上限，原索引已保留")
 	}
 	if err = nativeDownloadWrite(filepath.Join(manager.root, "index.json"), data); err != nil {
 		return errors.New("保存下载记录失败，请检查剩余存储空间")
@@ -188,6 +232,10 @@ func (manager *nativeDownloads) snapshot() ([]nativeDownloadJob, error) {
 }
 
 func (manager *nativeDownloads) enqueue(input nativeInput) (int, error) {
+	return manager.enqueueContext(context.Background(), input)
+}
+
+func (manager *nativeDownloads) enqueueContext(ctx context.Context, input nativeInput) (int, error) {
 	if !nativeDramaAvailable(input.Drama) {
 		return 0, errNativeBuildSource
 	}
@@ -214,33 +262,70 @@ func (manager *nativeDownloads) enqueue(input nativeInput) (int, error) {
 		return 0, manager.loadErr
 	}
 	added := []string{}
+	previous := map[string]nativeDownloadRecord{}
+	repaired := 0
+	tasks := manager.unarchivedCountLocked()
+	rollback := func() {
+		for id, old := range previous {
+			*manager.jobs[id] = old
+		}
+		for _, id := range added {
+			delete(manager.jobs, id)
+		}
+	}
 	for _, entry := range input.Entries {
+		if err := ctx.Err(); err != nil {
+			rollback()
+			return 0, err
+		}
 		id := nativeDownloadID(input.Drama.ID, entry.Index)
-		if manager.jobs[id] != nil {
+		if existing := manager.jobs[id]; existing != nil {
+			if input.Force {
+				if _, changed := previous[id]; !changed {
+					previous[id] = *existing
+				}
+				existing.Drama = mergeNativeDrama(existing.Drama, input.Drama)
+			}
+			if input.Force && (existing.State == "failed" || existing.State == "completed" && !manager.localFilesValid(*existing)) {
+				if existing.Archived {
+					if tasks >= 5000 {
+						rollback()
+						return 0, errors.New("下载任务已满，请先清理已完成任务")
+					}
+					tasks++
+				}
+				repaired++
+				existing.Chapter, existing.Quality = entry.Chapter, input.Quality
+				existing.State, existing.Error, existing.Archived = "queued", "", false
+			}
 			continue
 		}
-		if len(manager.jobs) >= 5000 {
-			for _, id := range added {
-				delete(manager.jobs, id)
-			}
+		if tasks >= 5000 {
+			rollback()
 			return 0, errors.New("下载记录已满，请清理不再需要的任务")
 		}
 		manager.jobs[id] = &nativeDownloadRecord{nativeDownloadJob: nativeDownloadJob{
 			ID: id, Drama: input.Drama, Chapter: entry.Chapter, Index: entry.Index,
 			Quality: input.Quality, State: "queued", Created: time.Now().UnixMilli()}}
+		if manager.bySource {
+			manager.jobs[id].Folder = input.Drama.Source + "/" + id
+		}
 		added = append(added, id)
+		tasks++
 	}
 	if err := manager.saveLocked(); err != nil {
-		for _, id := range added {
-			delete(manager.jobs, id)
-		}
+		rollback()
 		return 0, err
 	}
 	manager.scheduleLocked()
-	return len(added), nil
+	return len(added) + repaired, nil
 }
 
 func (manager *nativeDownloads) control(id, action string) error {
+	return manager.controlExpected(id, action, "")
+}
+
+func (manager *nativeDownloads) controlExpected(id, action, version string) error {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	if manager.loadErr != nil {
@@ -252,6 +337,18 @@ func (manager *nativeDownloads) control(id, action string) error {
 	if action == "remove" && manager.mediaBusy {
 		return errors.New("请等待合并或导出完成后再删除分集")
 	}
+	if version != "" {
+		job := manager.jobs[id]
+		if job == nil {
+			return nil
+		}
+		if action != "remove" || job.State != "completed" || nativeDownloadVersion(job.nativeDownloadJob) != version {
+			return errors.New("原分集已改变，已保留文件")
+		}
+	}
+	previous := map[string]nativeDownloadRecord{}
+	cancelIDs := []string{}
+	remember := func(job *nativeDownloadRecord) { previous[job.ID] = *job }
 	switch action {
 	case "pauseAll", "resumeAll":
 		for _, job := range manager.jobs {
@@ -259,16 +356,16 @@ func (manager *nativeDownloads) control(id, action string) error {
 				continue
 			}
 			if action == "pauseAll" && (job.State == "queued" || job.State == "downloading") {
+				remember(job)
 				job.State = "paused"
-				if cancel := manager.active[job.ID]; cancel != nil {
-					cancel()
-				}
+				cancelIDs = append(cancelIDs, job.ID)
 			}
 			if action == "resumeAll" && (job.State == "paused" || job.State == "failed") {
-				job.State, job.Error = "queued", ""
+				remember(job)
+				job.State, job.Error, job.Archived = "queued", "", false
 			}
 		}
-	case "pause", "resume", "remove":
+	case "pause", "resume", "remove", "archive", "restore":
 		job := manager.jobs[id]
 		if job == nil {
 			return errors.New("下载任务不存在，请刷新列表")
@@ -276,44 +373,66 @@ func (manager *nativeDownloads) control(id, action string) error {
 		if !nativeDownloadAvailable(job.nativeDownloadJob) {
 			return errNativeBuildSource
 		}
+		remember(job)
 		switch action {
+		case "archive", "restore":
+			if job.State != "completed" {
+				return errors.New("只能清理已完成的下载任务，未完成的分集请先暂停或取消")
+			}
+			if action == "restore" && job.Archived && manager.unarchivedCountLocked() >= 5000 {
+				return errors.New("下载任务已满，请先清理其他已完成任务；视频仍保留")
+			}
+			job.Archived = action == "archive"
 		case "pause":
 			if job.State == "queued" || job.State == "downloading" {
 				job.State = "paused"
-				if cancel := manager.active[id]; cancel != nil {
-					cancel()
-				}
+				cancelIDs = append(cancelIDs, id)
 			}
 		case "resume":
 			if job.State == "paused" || job.State == "failed" {
-				job.State, job.Error = "queued", ""
+				job.State, job.Error, job.Archived = "queued", "", false
 			}
 		case "remove":
-			if cancel := manager.active[id]; cancel != nil {
-				job.State = "removing"
-				cancel()
-			} else {
-				if err := os.RemoveAll(filepath.Join(manager.root, id)); err != nil {
-					return errors.New("文件正在使用或无法删除，请退出播放后重试")
-				}
-				delete(manager.jobs, id)
-			}
+			job.State, job.Error = "removing", ""
+			cancelIDs = append(cancelIDs, id)
 		}
 	default:
 		return errors.New("不支持的下载操作")
 	}
-	err := manager.saveLocked()
-	if err == nil {
-		manager.scheduleLocked()
+	if err := manager.saveLocked(); err != nil {
+		for key, value := range previous {
+			*manager.jobs[key] = value
+		}
+		return err
 	}
-	return err
+	for _, key := range cancelIDs {
+		if cancel := manager.active[key]; cancel != nil {
+			cancel()
+		}
+	}
+	if action == "remove" && manager.active[id] == nil {
+		job := manager.jobs[id]
+		if err := os.RemoveAll(manager.jobDirectory(job.nativeDownloadJob)); err != nil {
+			job.Error = "文件正在使用或无法删除，请退出播放后重试"
+			_ = manager.saveLocked()
+			return errors.New(job.Error)
+		}
+		delete(manager.jobs, id)
+		if err := manager.saveLocked(); err != nil {
+			job.Error = "文件已删除，记录尚未清理，请重试"
+			manager.jobs[id] = job
+			return err
+		}
+	}
+	manager.scheduleLocked()
+	return nil
 }
 
 func (manager *nativeDownloads) scheduleLocked() {
 	if manager.closed || manager.moving {
 		return
 	}
-	for len(manager.active) < 2 {
+	for len(manager.active) < max(1, manager.concurrency) {
 		var next *nativeDownloadRecord
 		for _, candidate := range manager.jobs {
 			if candidate.State != "queued" || manager.active[candidate.ID] != nil || !nativeDownloadAvailable(candidate.nativeDownloadJob) {
@@ -371,7 +490,7 @@ func (manager *nativeDownloads) run(ctx context.Context, job nativeDownloadJob) 
 	}
 	switch {
 	case record.State == "removing":
-		if removeErr := os.RemoveAll(filepath.Join(manager.root, job.ID)); removeErr == nil {
+		if removeErr := os.RemoveAll(manager.jobDirectory(job)); removeErr == nil {
 			delete(manager.jobs, job.ID)
 		} else {
 			record.State, record.Error = "failed", "文件无法删除，请稍后重试"
@@ -379,6 +498,7 @@ func (manager *nativeDownloads) run(ctx context.Context, job nativeDownloadJob) 
 	case err == nil:
 		record.State, record.Progress = "completed", 1
 		record.File, record.Key, record.ActualQuality = result.file, result.key, result.quality
+		record.Revision++
 		record.Error = ""
 	case record.State == "downloading":
 		record.State = "failed"
@@ -435,11 +555,10 @@ func (manager *nativeDownloads) localPlan(drama string, index int) (nativePlan, 
 		}
 		return nativePlan{}, false, nil
 	}
-	path := filepath.Join(manager.root, record.ID, record.File)
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() || info.Size() == 0 ||
-		(record.File == "media.mp4" && record.Bytes > 0 && info.Size() != record.Bytes) {
+	path := filepath.Join(manager.jobDirectory(record.nativeDownloadJob), record.File)
+	if !manager.localFilesValid(*record) {
 		record.State, record.Error = "failed", "本地文件缺失，请重新下载"
+		record.Archived = false
 		_ = manager.saveLocked()
 		return nativePlan{}, true, errNativeLocalFile
 	}

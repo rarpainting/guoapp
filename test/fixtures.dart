@@ -25,7 +25,7 @@ class FixtureRepository extends AppRepository {
   @override
   Future<void> initialize() async {}
   @override
-  Future<CatalogPage> cached(String source) async =>
+  Future<CatalogPage> cached(String source, {String category = ''}) async =>
       cachedPages[source] ?? CatalogPage([]);
   @override
   Future<String> cover(Drama drama, {bool force = false}) async =>
@@ -35,6 +35,7 @@ class FixtureRepository extends AppRepository {
     String source, {
     int page = 1,
     String query = '',
+    String category = '',
     bool force = false,
   }) async {
     requests.add(source);

@@ -4,46 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
-	"net/url"
 	"strings"
 	"unicode/utf8"
 )
 
 func (engine *nativeEngine) suggestions(ctx context.Context, query string) ([]string, error) {
-	query = strings.TrimSpace(query)
-	if query == "" {
+	if strings.TrimSpace(query) == "" {
 		return []string{}, nil
 	}
-	if utf8.RuneCountInString(query) > 100 {
-		return nil, errors.New("搜索词过长")
+	items, err := engine.downloader.hongguoSearchSuggestions(ctx, query)
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.Name)
 	}
-	address := "https://hongguoduanju.com/incent_resource/suggestion?" +
-		url.Values{"app_id": {"8662"}, "query": {query}, "count": {"10"}}.Encode()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Referer", "https://hongguoduanju.com/")
-	request.Header.Set("User-Agent", "Mozilla/5.0")
-	response, err := engine.downloader.doCatalogRequestWithTimeout(request, 8_000_000_000)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, 256*1024+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(body) > 256*1024 {
-		return nil, errors.New("联想接口返回内容过大")
-	}
-	if response.StatusCode != http.StatusOK {
-		return nil, engine.downloader.catalogResponseError(request, response, body)
-	}
-	return nativeParseSuggestions(body)
+	return names, err
 }
 
 func nativeParseSuggestions(body []byte) ([]string, error) {

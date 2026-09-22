@@ -29,6 +29,28 @@ type libraryUpdateKey struct{}
 type libraryKnownKey struct{}
 
 func (downloader *Downloader) fetchHongguoAppCatalog(ctx context.Context) ([]Drama, error) {
+	return downloader.fetchHongguoAppCatalogCategory(ctx, "")
+}
+
+func (downloader *Downloader) fetchHongguoAppCatalogCategory(ctx context.Context, category string) ([]Drama, error) {
+	genres := hongguoAppGenres
+	if category != "" {
+		genres = nil
+		for _, genre := range hongguoAppGenres {
+			if genre.key == category {
+				genres = append(genres, genre)
+			}
+		}
+		if len(genres) == 0 {
+			return nil, errors.New("红果分类无效")
+		}
+	}
+	feedKey := func(key string) string {
+		if category != "" {
+			return "category:" + key
+		}
+		return key
+	}
 	client := downloader.hongguoClient()
 	client.catalogMu.Lock()
 	defer client.catalogMu.Unlock()
@@ -55,9 +77,9 @@ func (downloader *Downloader) fetchHongguoAppCatalog(ctx context.Context) ([]Dra
 		done   bool
 		pages  int
 	}
-	scans := make([]feedScan, len(hongguoAppGenres))
-	for index, genre := range hongguoAppGenres {
-		cursor := state.Feeds[genre.key]
+	scans := make([]feedScan, len(genres))
+	for index, genre := range genres {
+		cursor := state.Feeds[feedKey(genre.key)]
 		if !more && cursor.Initialized {
 			scans[index].head = true
 			scans[index].tail = cursor
@@ -71,7 +93,7 @@ func (downloader *Downloader) fetchHongguoAppCatalog(ctx context.Context) ([]Dra
 	var failures []error
 	for round := 0; round < roundLimit; round++ {
 		active := false
-		for index, genre := range hongguoAppGenres {
+		for index, genre := range genres {
 			scan := &scans[index]
 			if scan.done || !scan.head && scan.pages >= pageLimit {
 				continue
@@ -81,7 +103,7 @@ func (downloader *Downloader) fetchHongguoAppCatalog(ctx context.Context) ([]Dra
 			}
 			active = true
 			cursor := scan.cursor
-			if time.Since(cursor.UpdatedAt) > 30*time.Minute {
+			if age := time.Since(cursor.UpdatedAt); age < 0 || age > 30*time.Minute {
 				cursor.SessionID = ""
 			}
 			payload := map[string]any{
@@ -159,7 +181,7 @@ func (downloader *Downloader) fetchHongguoAppCatalog(ctx context.Context) ([]Dra
 				}
 			}
 			client.mu.Lock()
-			client.state.Feeds[genre.key] = checkpoint
+			client.state.Feeds[feedKey(genre.key)] = checkpoint
 			client.mu.Unlock()
 			reportLibraryProgress(ctx, sourceHongguo, items, nil, false)
 		}
@@ -210,10 +232,17 @@ func parseHongguoCatalogPage(result map[string]any, cursor hongguoCatalogCursor,
 	if hasMore && (len(items) == 0 || next <= cursor.Offset || next > 1_000_000 || signature == cursor.PageSignature) {
 		return items, cursor, errors.New("App 分页未前进，已保留上次位置")
 	}
+	if !hasMore && (next < cursor.Offset || next > 1_000_000) {
+		next = cursor.Offset
+	}
+	session := mapString(data, "session_id")
+	if len(session) > 4096 || strings.ContainsAny(session, "\r\n\x00") {
+		return items, cursor, errors.New("App 分页会话无效，已保留上次位置")
+	}
 	cursor.Exhausted = !hasMore
 	cursor.Initialized = true
 	cursor.Offset = next
-	cursor.SessionID = mapString(data, "session_id")
+	cursor.SessionID = session
 	cursor.LastID = lastID
 	cursor.PageSignature = signature
 	cursor.UpdatedAt = time.Now()

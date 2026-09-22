@@ -355,7 +355,14 @@ class RemoteEpisodeButton extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('$number', style: const TextStyle(fontSize: 20)),
+          Flexible(
+            child: Text(
+              '$number',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 20),
+            ),
+          ),
           if (vip) ...[
             const SizedBox(width: 4),
             Icon(
@@ -376,8 +383,12 @@ class TelevisionSearchDialog extends StatefulWidget {
     required this.initialValue,
     required this.title,
     this.suggestions,
+    this.recentSearches = const [],
+    this.onCancel,
   });
   final Future<List<String>> Function(String)? suggestions;
+  final List<String> recentSearches;
+  final VoidCallback? onCancel;
   final String initialValue;
   final String title;
 
@@ -398,12 +409,40 @@ class _TelevisionSearchDialogState extends State<TelevisionSearchDialog> {
     title: Text(widget.title),
     content: SizedBox(
       width: 460,
-      child: SearchInput(
-        autofocus: true,
-        controller: _controller,
-        hint: '输入剧名',
-        suggestions: widget.suggestions,
-        onSearch: (value) => Navigator.pop(context, value),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * .6,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SearchInput(
+                autofocus: true,
+                controller: _controller,
+                hint: '输入剧名',
+                suggestions: widget.suggestions,
+                onCancel: widget.onCancel,
+                onSearch: (value) => Navigator.pop(context, value),
+              ),
+              if (widget.recentSearches.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final query in widget.recentSearches)
+                      ActionChip(
+                        label: Text(query),
+                        avatar: const Icon(Icons.history_rounded, size: 16),
+                        onPressed: () => Navigator.pop(context, query),
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     ),
     actions: [

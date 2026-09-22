@@ -49,6 +49,7 @@ class InterfaceRepository extends FixtureRepository {
     String source, {
     int page = 1,
     String query = '',
+    String category = '',
     bool force = false,
   }) async {
     requests.add(source);

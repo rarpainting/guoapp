@@ -15,6 +15,9 @@ func coverPathFromAny(v any) string {
 		if s == "" {
 			return ""
 		}
+		if strings.HasPrefix(s, "//") {
+			return "https:" + s
+		}
 		if strings.HasPrefix(s, "/api/ui/image") {
 			if u, err := url.Parse(s); err == nil {
 				if raw := strings.TrimSpace(u.Query().Get("url")); raw != "" {
@@ -30,6 +33,12 @@ func coverPathFromAny(v any) string {
 		for _, key := range []string{"url", "src", "path", "cover", "coverUrl", "cover_url", "image", "pic", "poster"} {
 			if s := coverPathFromAny(x[key]); s != "" {
 				return s
+			}
+		}
+	case []any:
+		for _, value := range x {
+			if address := coverPathFromAny(value); address != "" {
+				return address
 			}
 		}
 	}

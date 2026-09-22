@@ -1,4 +1,8 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import 'app_layout.dart';
@@ -10,6 +14,9 @@ import 'models.dart';
 import 'player_screen.dart';
 import 'remote_widgets.dart';
 import 'widgets.dart';
+import 'sources_screen.dart';
+import 'episode_browser.dart';
+import 'follow_state.dart';
 
 class DetailScreen extends StatefulWidget {
   const DetailScreen({
@@ -17,10 +24,14 @@ class DetailScreen extends StatefulWidget {
     required this.drama,
     required this.repository,
     required this.store,
+    this.resumeOnOpen = false,
+    this.downloadOnOpen = false,
   });
   final Drama drama;
   final AppRepository repository;
   final LocalStore store;
+  final bool resumeOnOpen;
+  final bool downloadOnOpen;
   @override
   State<DetailScreen> createState() => _DetailScreenState();
 }
@@ -30,9 +41,25 @@ class _DetailScreenState extends State<DetailScreen> {
   String? _error;
   bool _loading = true;
   int _generation = 0;
+  int _episodePage = 0;
+  int? _locatedNumber;
+  bool _expandedDescription = false;
+  final _episodeAnchor = GlobalKey();
+  final _detailScroll = ScrollController();
+  bool _initialActionHandled = false;
+  late final int _profileEpoch;
+  Widget? get _sourceDiagnostics => widget.repository.supportsSourceManagement
+      ? SourceDiagnosticsButton(
+          repository: widget.repository,
+          store: widget.store,
+          drama: widget.drama,
+        )
+      : null;
+
   @override
   void initState() {
     super.initState();
+    _profileEpoch = widget.store.profileEpoch;
     widget.store.addListener(_onStoreChanged);
     _load();
   }
@@ -48,6 +75,7 @@ class _DetailScreenState extends State<DetailScreen> {
 
   @override
   void dispose() {
+    _detailScroll.dispose();
     widget.store.removeListener(_onStoreChanged);
     _generation++;
     super.dispose();
@@ -67,16 +95,47 @@ class _DetailScreenState extends State<DetailScreen> {
     });
     try {
       final detail = await widget.repository.detail(widget.drama);
-      if (!mounted || generation != _generation) {
+      if (!mounted ||
+          generation != _generation ||
+          _profileEpoch != widget.store.profileEpoch) {
         return;
       }
+      final merged = widget.repository.catalogUpdates
+          .current(widget.drama)
+          .merge(detail.drama);
       setState(() {
-        _detail = detail;
+        _detail = DramaDetail(merged, detail.episodes, warning: detail.warning);
         _loading = false;
+        _episodePage =
+            resumeEpisodeIndex(
+              detail.episodes,
+              widget.store.watched(merged.id),
+            ) ~/
+            episodePageSize;
       });
-      try {
-        await widget.store.refreshDrama(detail.drama);
-      } catch (_) {}
+      widget.repository.catalogUpdates.publish(merged, retryCover: true);
+      unawaited(_supplement(merged, generation));
+      await saveUserChange(context, () => widget.store.refreshDrama(merged));
+      if (mounted &&
+          generation == _generation &&
+          _profileEpoch == widget.store.profileEpoch &&
+          !_initialActionHandled &&
+          detail.episodes.isNotEmpty) {
+        _initialActionHandled = true;
+        if (widget.resumeOnOpen) {
+          unawaited(
+            _play(
+              resumeEpisodeIndex(
+                detail.episodes,
+                widget.store.watched(merged.id),
+              ),
+              resume: true,
+            ),
+          );
+        } else if (widget.downloadOnOpen && widget.store.canDownload) {
+          unawaited(_download());
+        }
+      }
     } catch (error) {
       if (!mounted || generation != _generation) {
         return;
@@ -85,16 +144,56 @@ class _DetailScreenState extends State<DetailScreen> {
         _error = error.toString();
         _loading = false;
       });
+      widget.repository.catalogUpdates.publish(
+        widget.repository.catalogUpdates.current(widget.drama),
+        retryCover: true,
+      );
     }
+  }
+
+  Future<void> _supplement(Drama drama, int generation) async {
+    try {
+      final fresh = await widget.repository.supplementMetadata(drama);
+      if (!mounted ||
+          generation != _generation ||
+          fresh == null ||
+          _detail == null) {
+        return;
+      }
+      final updated = _detail!.drama.merge(fresh);
+      setState(() {
+        _detail = DramaDetail(
+          updated,
+          _detail!.episodes,
+          warning: _detail!.warning,
+        );
+      });
+      widget.repository.catalogUpdates.publish(updated);
+      await saveUserChange(context, () => widget.store.refreshDrama(updated));
+    } catch (_) {}
   }
 
   Future<void> _download() async {
     final detail = _detail;
-    if (detail == null) return;
+    if (detail == null ||
+        !widget.store.canDownload ||
+        _profileEpoch != widget.store.profileEpoch) {
+      return;
+    }
     final selection = await Navigator.of(context).push<DownloadSelection>(
-      MaterialPageRoute(builder: (_) => DownloadPicker(detail: detail)),
+      MaterialPageRoute(
+        builder: (_) => DownloadPicker(
+          detail: detail,
+          preferences: widget.store.downloadPreferences,
+        ),
+      ),
     );
-    if (selection == null || !mounted) return;
+    if (selection == null ||
+        !mounted ||
+        !widget.store.canDownload ||
+        _profileEpoch != widget.store.profileEpoch) {
+      return;
+    }
     try {
       final added = await widget.repository.enqueueDownloads(
         detail,
@@ -131,7 +230,11 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Future<void> _play(int index, {bool resume = false}) async {
     final detail = _detail;
-    if (detail == null || index < 0 || index >= detail.episodes.length) {
+    if (detail == null ||
+        index < 0 ||
+        index >= detail.episodes.length ||
+        _profileEpoch != widget.store.profileEpoch ||
+        !widget.store.allowsSource(detail.drama.source)) {
       return;
     }
     if (detail.episodes[index].vip) {
@@ -164,7 +267,7 @@ class _DetailScreenState extends State<DetailScreen> {
             !saved!.finished
         ? saved.position
         : 0.0;
-    if (!mounted) {
+    if (!mounted || _profileEpoch != widget.store.profileEpoch) {
       return;
     }
     await Navigator.of(context).push(
@@ -187,19 +290,12 @@ class _DetailScreenState extends State<DetailScreen> {
   Widget build(BuildContext context) {
     final drama = _detail?.drama ?? widget.drama;
     final watched = widget.store.watched(drama.id);
-    var resumeIndex = 0;
-    final episodes = _detail?.episodes ?? [];
-    if (watched != null && episodes.isNotEmpty) {
-      final found = episodes.indexWhere(
-        (episode) => episode.number == watched.episode,
-      );
-      if (found >= 0) {
-        resumeIndex = watched.finished && found + 1 < episodes.length
-            ? found + 1
-            : found;
-      }
-    }
+    final episodes = _detail?.episodes ?? <Episode>[];
+    final resumeIndex = resumeEpisodeIndex(episodes, watched);
     final television = AppLayout.isTelevision(context);
+    final allowed =
+        widget.store.profileEpoch == _profileEpoch &&
+        widget.store.allowsSource(drama.source);
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () =>
@@ -212,387 +308,457 @@ class _DetailScreenState extends State<DetailScreen> {
           toolbarHeight: television ? 64 : null,
           title: Text(drama.title, overflow: TextOverflow.ellipsis),
           actions: [
-            if (widget.repository.supportsDownloads)
-              IconButton(
-                tooltip: '下载选集',
-                onPressed: _loading || episodes.isEmpty ? null : _download,
-                icon: const Icon(Icons.download_rounded),
-              ),
             RefreshAction(
               loading: _loading,
               tooltip: '更新剧集信息',
-              onPressed: _load,
-            ),
-            IconButton(
-              tooltip: widget.store.isFavorite(drama.id) ? '取消追剧' : '加入追剧',
-              onPressed: () => widget.store.toggleFavorite(drama),
-              icon: Icon(
-                widget.store.isFavorite(drama.id)
-                    ? Icons.bookmark_rounded
-                    : Icons.bookmark_border_rounded,
-              ),
+              onPressed: allowed ? _load : null,
             ),
           ],
         ),
         body: SafeArea(
           top: false,
-          child: television
-              ? _televisionBody(drama, episodes, resumeIndex, watched)
-              : Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1100),
-                    child: CustomScrollView(
-                      slivers: [
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                SizedBox(
-                                  width: 112,
-                                  height: 168,
-                                  child: DramaCover(
-                                    drama: drama,
-                                    repository: widget.repository,
-                                  ),
-                                ),
-                                const SizedBox(width: 20),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        drama.title,
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.titleLarge,
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        SourceSite.byId(drama.source).name +
-                                            (drama.episodes > 0
-                                                ? ' · 共 ${drama.episodes} 集'
-                                                : ''),
-                                        style: TextStyle(
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant,
-                                        ),
-                                      ),
-                                      if (drama.category.isNotEmpty) ...[
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          drama.category,
-                                          style: TextStyle(
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSurfaceVariant,
-                                          ),
-                                        ),
-                                      ],
-                                      const SizedBox(height: 18),
-                                      FilledButton.icon(
-                                        key: const ValueKey('start-play'),
-                                        onPressed: episodes.isEmpty
-                                            ? null
-                                            : () => _play(
-                                                resumeIndex,
-                                                resume: true,
-                                              ),
-                                        icon: const Icon(
-                                          Icons.play_arrow_rounded,
-                                        ),
-                                        label: Text(
-                                          watched != null && episodes.isNotEmpty
-                                              ? '继续第 ${episodes[resumeIndex].number} 集'
-                                              : '立即播放',
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
+          bottom: false,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1200),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  if (!allowed) {
+                    return const StatusPanel(
+                      title: '当前用户无权访问',
+                      message: '请返回剧库后重新选择。',
+                    );
+                  }
+                  if (television || constraints.maxWidth >= 960) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          width: (constraints.maxWidth * .34).clamp(
+                            250.0,
+                            360.0,
+                          ),
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(20),
+                            child: _overview(drama),
                           ),
                         ),
-                        if (drama.description.isNotEmpty)
-                          SliverToBoxAdapter(
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                              child: Text(
-                                drama.description,
-                                maxLines: 6,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                  height: 1.6,
+                        const VerticalDivider(width: 1),
+                        Expanded(
+                          child: _loading || _error != null || episodes.isEmpty
+                              ? _episodeStatus()
+                              : EpisodeBrowser(
+                                  episodes: episodes,
+                                  currentNumber: watched?.episode,
+                                  onSelected: (index) => _play(index),
                                 ),
-                              ),
-                            ),
-                          ),
-                        if (_loading)
-                          const SliverToBoxAdapter(
-                            child: Padding(
-                              padding: EdgeInsets.all(40),
-                              child: Center(child: CircularProgressIndicator()),
-                            ),
-                          )
-                        else if (_error != null)
-                          SliverToBoxAdapter(
-                            child: StatusPanel(
-                              title: '剧集信息暂时不可用',
-                              message: _error!,
-                              onRetry: _load,
-                            ),
-                          )
-                        else ...[
-                          SliverToBoxAdapter(
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                              child: Row(
-                                children: [
-                                  Text(
-                                    '选集',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleMedium,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    '共 ${episodes.length} 集',
-                                    style: TextStyle(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          SliverPadding(
-                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
-                            sliver: SliverGrid(
-                              gridDelegate:
-                                  const SliverGridDelegateWithMaxCrossAxisExtent(
-                                    maxCrossAxisExtent: 96,
-                                    mainAxisExtent: 52,
-                                    crossAxisSpacing: 10,
-                                    mainAxisSpacing: 10,
-                                  ),
-                              delegate: SliverChildBuilderDelegate((_, index) {
-                                final episode = episodes[index];
-                                final current =
-                                    watched?.episode == episode.number;
-                                return OutlinedButton(
-                                  key: ValueKey('episode-${episode.number}'),
-                                  onPressed: () => _play(index),
-                                  style: OutlinedButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    backgroundColor: current
-                                        ? Theme.of(
-                                            context,
-                                          ).colorScheme.primaryContainer
-                                        : null,
-                                    side: BorderSide(
-                                      color: current
-                                          ? Theme.of(
-                                              context,
-                                            ).colorScheme.primary
-                                          : Theme.of(
-                                              context,
-                                            ).colorScheme.outlineVariant,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text('${episode.number}'),
-                                      if (episode.vip) ...[
-                                        const SizedBox(width: 4),
-                                        Icon(
-                                          Icons.workspace_premium_rounded,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.tertiary,
-                                          size: 14,
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                );
-                              }, childCount: episodes.length),
-                            ),
-                          ),
-                        ],
+                        ),
                       ],
-                    ),
+                    );
+                  }
+                  final start = _episodePage * episodePageSize;
+                  final visible = episodes
+                      .skip(start)
+                      .take(episodePageSize)
+                      .toList();
+                  return CustomScrollView(
+                    controller: _detailScroll,
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                          child: _overview(drama),
+                        ),
+                      ),
+                      if (_loading || _error != null || episodes.isEmpty)
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: _episodeStatus(),
+                        )
+                      else ...[
+                        SliverToBoxAdapter(
+                          child: EpisodeRangeBar(
+                            key: _episodeAnchor,
+                            episodes: episodes,
+                            page: _episodePage,
+                            currentNumber: watched?.episode,
+                            onLocate: _locateEpisode,
+                          ),
+                        ),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                          sliver: SliverGrid(
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: _episodeColumns(
+                                    constraints.maxWidth,
+                                    episodes,
+                                  ),
+                                  mainAxisExtent: math.max(
+                                    54,
+                                    MediaQuery.textScalerOf(context).scale(20) +
+                                        30,
+                                  ),
+                                  crossAxisSpacing: 10,
+                                  mainAxisSpacing: 10,
+                                ),
+                            delegate: SliverChildBuilderDelegate((
+                              context,
+                              index,
+                            ) {
+                              final episode = visible[index];
+                              return RemoteEpisodeButton(
+                                key: ValueKey('episode-${episode.number}'),
+                                number: episode.number,
+                                vip: episode.vip,
+                                current:
+                                    episode.number == watched?.episode ||
+                                    episode.number == _locatedNumber,
+                                onPressed: () => _play(start + index),
+                              );
+                            }, childCount: visible.length),
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+        bottomNavigationBar: Material(
+          color: Theme.of(context).colorScheme.surface,
+          child: SafeArea(
+            top: false,
+            child: Center(
+              heightFactor: 1,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1000),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                  child: Row(
+                    children: [
+                      if (widget.repository.supportsDownloads &&
+                          widget.store.canDownload) ...[
+                        IconButton.filledTonal(
+                          tooltip: '下载选集',
+                          onPressed: allowed && !_loading && episodes.isNotEmpty
+                              ? _download
+                              : null,
+                          style: IconButton.styleFrom(
+                            minimumSize: const Size(52, 52),
+                          ),
+                          icon: const Icon(Icons.download_rounded),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                      Expanded(
+                        child: FilledButton.icon(
+                          key: const ValueKey('start-play'),
+                          autofocus: television,
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(0, 52),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                          ),
+                          onPressed: !allowed || _loading || episodes.isEmpty
+                              ? null
+                              : () => _play(resumeIndex, resume: true),
+                          icon: const Icon(Icons.play_arrow_rounded, size: 26),
+                          label: Text(
+                            watched != null && episodes.isNotEmpty
+                                ? '继续播放 · 第 ${episodes[resumeIndex].number} 集'
+                                : '立即播放',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+              ),
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _televisionBody(
-    Drama drama,
-    List<Episode> episodes,
-    int resumeIndex,
-    WatchEntry? watched,
-  ) => LayoutBuilder(
-    builder: (context, constraints) => Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+  Widget _episodeStatus() {
+    if (_loading) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+    return StatusPanel(
+      title: _error != null ? '剧集信息暂时不可用' : '暂时没有可播放的集数',
+      message: _error ?? '可以更新剧集信息后重试。',
+      onRetry: _load,
+      secondaryAction: _sourceDiagnostics,
+    );
+  }
+
+  void _locateEpisode(int index) {
+    final episodes = _detail!.episodes;
+    setState(() {
+      _episodePage = index ~/ episodePageSize;
+      _locatedNumber = episodes[index].number;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final anchor = _episodeAnchor.currentContext;
+      if (!mounted || anchor == null || !_detailScroll.hasClients) return;
+      final render = anchor.findRenderObject();
+      if (render is! RenderBox || !render.hasSize) return;
+      final viewport = RenderAbstractViewport.maybeOf(render);
+      if (viewport == null) return;
+      final start = viewport.getOffsetToReveal(render, 0).offset;
+      final extent = math.max(
+        54,
+        MediaQuery.textScalerOf(context).scale(20) + 30,
+      );
+      final columns = _episodeColumns(render.size.width, episodes);
+      final target =
+          start +
+          render.size.height +
+          (index % episodePageSize ~/ columns) * (extent + 10) -
+          _detailScroll.position.viewportDimension * .3;
+      _detailScroll.animateTo(
+        target.clamp(0.0, _detailScroll.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  int _episodeColumns(double width, List<Episode> episodes) {
+    final digits = episodes.fold<int>(
+      1,
+      (value, episode) => math.max(value, episode.number.toString().length),
+    );
+    final minimum = math.max(
+      82,
+      MediaQuery.textScalerOf(context).scale(20) * digits * .65 + 40,
+    );
+    return ((width - 40) / minimum).floor().clamp(1, 12);
+  }
+
+  Widget _overview(Drama drama) {
+    final colors = Theme.of(context).colorScheme;
+    final meta = [
+      SourceSite.byId(drama.source).name,
+      if (drama.episodes > 0) '共 ${drama.episodes} 集',
+      if (drama.releaseStatus.isNotEmpty && drama.releaseStatus != 'unknown')
+        drama.releaseLabel,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(
-          width: (constraints.maxWidth * .34).clamp(210.0, 340.0),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(24, 12, 20, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: 92,
-                      height: 138,
-                      child: DramaCover(
-                        drama: drama,
-                        repository: widget.repository,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            drama.title,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            SourceSite.byId(drama.source).name,
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          if (episodes.isNotEmpty)
-                            Text('共 ${episodes.length} 集'),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                if (drama.description.isNotEmpty) ...[
-                  const SizedBox(height: 18),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 92,
+              height: 138,
+              child: DramaCover(drama: drama, repository: widget.repository),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    drama.description,
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 16,
-                      height: 1.5,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    drama.title,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                ],
-                const SizedBox(height: 16),
-                if (episodes.isNotEmpty)
-                  RemoteButton(
-                    key: const ValueKey('start-play'),
-                    autofocus: true,
-                    label: watched != null
-                        ? '继续第 ${episodes[resumeIndex].number} 集'
-                        : '立即播放',
-                    icon: Icons.play_arrow_rounded,
-                    onPressed: () => _play(resumeIndex, resume: true),
+                  const SizedBox(height: 10),
+                  Text(
+                    meta.join(' · '),
+                    style: TextStyle(
+                      color: colors.onSurfaceVariant,
+                      height: 1.5,
+                    ),
                   ),
-                RemoteButton(
-                  label: widget.store.isFavorite(drama.id) ? '已追剧' : '加入追剧',
-                  icon: widget.store.isFavorite(drama.id)
-                      ? Icons.bookmark_rounded
-                      : Icons.bookmark_border_rounded,
-                  onPressed: () => widget.store.toggleFavorite(drama),
+                  if (drama.category.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        drama.category,
+                        style: TextStyle(color: colors.onSurfaceVariant),
+                      ),
+                    ),
+                  if (drama.source == 'huangdou')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        drama.vipStatus == null
+                            ? 'VIP 状态待补齐'
+                            : drama.vip
+                            ? 'VIP 内容'
+                            : '免费内容',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _followingControls(drama),
+        if (drama.onlineDate.isNotEmpty ||
+            drama.heat.isNotEmpty ||
+            drama.views.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(
+              [
+                if (drama.onlineDate.isNotEmpty) '${drama.onlineDate} 上线',
+                if (drama.heat.isNotEmpty) '热度 ${drama.heat}',
+                if (drama.views.isNotEmpty) '播放 ${drama.views}',
+              ].join(' · '),
+              style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
+            ),
+          ),
+        if (drama.tags.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final tag in drama.tags.take(12))
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: colors.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 5,
+                      ),
+                      child: Text(
+                        tag,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        if (drama.description.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text(
+            drama.description,
+            maxLines: _expandedDescription ? null : 3,
+            overflow: _expandedDescription
+                ? TextOverflow.visible
+                : TextOverflow.ellipsis,
+            style: TextStyle(color: colors.onSurfaceVariant, height: 1.6),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () =>
+                  setState(() => _expandedDescription = !_expandedDescription),
+              child: Text(_expandedDescription ? '收起简介' : '展开简介'),
+            ),
+          ),
+        ],
+        if (_detail?.warning.isNotEmpty == true)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              _detail!.warning,
+              style: TextStyle(color: colors.error),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _followingControls(Drama drama) {
+    final state = widget.store.following(drama.id);
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        PopupMenuButton<String>(
+          key: const ValueKey('follow-status'),
+          tooltip: '追剧与观看状态',
+          onSelected: (value) async {
+            if (_profileEpoch != widget.store.profileEpoch) return;
+            if (value == 'remove') {
+              await saveUserChange(
+                context,
+                () => widget.store.toggleFavorite(drama),
+              );
+            } else {
+              final status = FollowStatus.values.firstWhere(
+                (status) => status.name == value,
+              );
+              await saveUserChange(
+                context,
+                () => widget.store.setFollowStatus(drama, status),
+              );
+            }
+          },
+          itemBuilder: (_) => [
+            for (final status in FollowStatus.values)
+              CheckedPopupMenuItem(
+                value: status.name,
+                checked: state?.status == status,
+                child: Text(status.label),
+              ),
+            if (state != null)
+              const PopupMenuItem(value: 'remove', child: Text('取消追剧')),
+          ],
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: state == null
+                  ? Theme.of(context).colorScheme.surfaceContainerHighest
+                  : Theme.of(context).colorScheme.secondaryContainer,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  state?.status == FollowStatus.watched
+                      ? Icons.check_circle_outline
+                      : state == null
+                      ? Icons.bookmark_add_outlined
+                      : Icons.bookmark_rounded,
+                  size: 20,
                 ),
+                const SizedBox(width: 8),
+                Text(state?.label ?? '加入追剧'),
+                const SizedBox(width: 4),
+                const Icon(Icons.expand_more_rounded, size: 18),
               ],
             ),
           ),
         ),
-        const VerticalDivider(width: 1),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _error != null
-              ? StatusPanel(
-                  title: '剧集信息暂时不可用',
-                  message: _error!,
-                  onRetry: _load,
-                )
-              : episodes.isEmpty
-              ? StatusPanel(
-                  title: '暂时没有可播放的集数',
-                  message: '可以更新剧集信息后重试。',
-                  onRetry: _load,
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(20, 12, 20, 8),
-                      child: Text(
-                        '选集',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: LayoutBuilder(
-                        builder: (context, constraints) => RemoteGrid(
-                          key: ValueKey('detail-episodes-${drama.id}'),
-                          itemKeys: episodes
-                              .map((episode) => '${episode.number}')
-                              .toList(),
-                          columns: ((constraints.maxWidth - 36) / 96)
-                              .floor()
-                              .clamp(1, 8),
-                          itemExtent: 64,
-                          itemBuilder: (_, index, node, onFocus) =>
-                              RemoteEpisodeButton(
-                                key: ValueKey(
-                                  'episode-${episodes[index].number}',
-                                ),
-                                number: episodes[index].number,
-                                vip: episodes[index].vip,
-                                current:
-                                    watched?.episode == episodes[index].number,
-                                focusNode: node,
-                                onFocus: onFocus,
-                                onPressed: () => _play(index),
-                              ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-        ),
+        if (state != null && state.newEpisodes > 0)
+          ActionChip(
+            label: Text('${state.newEpisodes} 集更新 · 标为已读'),
+            onPressed: () => saveUserChange(
+              context,
+              () => widget.store.markUpdatesRead(drama.id),
+            ),
+          ),
       ],
-    ),
-  );
+    );
+  }
 }

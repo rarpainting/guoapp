@@ -39,9 +39,9 @@ void main() {
       }
 
       Future<void> source(String name) async {
-        final chip = find.widgetWithText(ChoiceChip, name);
-        await tester.ensureVisible(chip);
-        await tester.tap(chip);
+        await tester.tap(find.byKey(const ValueKey('source-switch')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(name).last);
         await tester.pumpAndSettle();
       }
 
@@ -86,17 +86,17 @@ void main() {
 
       if (allSourcesEnabled) {
         await source('黄豆');
-        expect(find.text('VIP：隐藏'), findsOneWidget);
+        expect(find.byTooltip('VIP：隐藏'), findsOneWidget);
         expect(find.text('会员合成剧'), findsNothing);
         await capture('interface-huangdou-vip');
-        for (final name in ['黄果视频', '黄果 AI', '红果']) {
+        for (final name in ['黄果', '红果']) {
           await source(name);
           expect(find.textContaining('VIP：'), findsNothing);
-          expect(find.text('会员合成剧'), findsOneWidget);
+          expect(find.text('会员合成剧'), findsWidgets);
         }
       } else {
         expect(find.text('黄豆'), findsNothing);
-        expect(find.text(appName), findsOneWidget);
+        expect(find.text('红果'), findsOneWidget);
       }
       await store.setThemeMode('dark');
       await tester.pumpAndSettle();

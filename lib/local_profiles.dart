@@ -44,6 +44,8 @@ class LocalProfile {
     final salt = value['salt'] as String? ?? '';
     final hash = value['pinHash'] as String? ?? '';
     if (!RegExp(r'^[a-zA-Z0-9_-]{1,64}$').hasMatch(id) ||
+        value['admin'] is! bool ||
+        (value.containsKey('download') && value['download'] is! bool) ||
         name.isEmpty ||
         name.length > 40 ||
         admin != (id == 'default') ||

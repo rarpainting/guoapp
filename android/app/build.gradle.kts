@@ -59,6 +59,12 @@ android {
             signingConfig = signingConfigs.getByName(if (releaseKey.exists()) "release" else "debug")
         }
     }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 kotlin {
@@ -68,3 +74,19 @@ kotlin {
 }
 
 flutter { source = "../.." }
+
+tasks.withType<JavaCompile>().configureEach {
+    if (name.contains("Release")) {
+        doFirst {
+            val registrant = file("src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java")
+            if (registrant.exists()) {
+                val generated = registrant.readText()
+                val integrationPlugin = Regex(
+                    """(?s)    try \{\s*flutterEngine\.getPlugins\(\)\.add\(new dev\.flutter\.plugins\.integration_test\.IntegrationTestPlugin\(\)\);\s*\} catch \(Exception e\) \{[^}]*\}\s*"""
+                )
+                val release = generated.replace(integrationPlugin, "")
+                if (release != generated) registrant.writeText(release)
+            }
+        }
+    }
+}

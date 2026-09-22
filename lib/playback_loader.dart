@@ -31,6 +31,9 @@ class PlaybackLoader {
   Future<PlaybackPlan?> fallback(PlaybackPlan current) =>
       _load(() => repository.fallback(current));
 
+  Future<PlaybackPlan?> use(PlaybackPlan prepared) =>
+      _load(() async => prepared);
+
   Future<PlaybackPlan?> _load(Future<PlaybackPlan> Function() resolve) async {
     if (_closed) {
       return null;

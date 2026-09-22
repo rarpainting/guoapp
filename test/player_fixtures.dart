@@ -10,6 +10,7 @@ class ScriptedPlayer extends PlatformPlayer {
   final opened = <Media>[];
   final played = <bool>[];
   bool disposed = false;
+  final rates = <double>[];
 
   @override
   Future<void> open(Playable playable, {bool play = true}) async {
@@ -21,6 +22,7 @@ class ScriptedPlayer extends PlatformPlayer {
       position: failed ? Duration.zero : media.start ?? Duration.zero,
       duration: failed ? Duration.zero : const Duration(minutes: 2),
       playing: play,
+      completed: false,
       buffering: false,
       width: failed ? 0 : 320,
       height: failed ? 0 : 180,
@@ -60,8 +62,32 @@ class ScriptedPlayer extends PlatformPlayer {
 
   @override
   Future<void> setRate(double rate) async {
+    rates.add(rate);
     state = state.copyWith(rate: rate);
     rateController.add(rate);
+  }
+
+  @override
+  Future<void> setVolume(double volume) async {
+    state = state.copyWith(volume: volume);
+    volumeController.add(volume);
+  }
+
+  void finishEpisode() {
+    state = state.copyWith(
+      position: state.duration,
+      completed: true,
+      playing: false,
+    );
+    positionController.add(state.position);
+    completedController.add(true);
+    playingController.add(false);
+  }
+
+  void videoSize(int width, int height) {
+    videoParamsController.add(
+      VideoParams(w: width, h: height, dw: width, dh: height),
+    );
   }
 
   @override

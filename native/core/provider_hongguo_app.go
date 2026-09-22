@@ -45,6 +45,8 @@ type hongguoAppClient struct {
 	pending        map[string]*hongguoDetailCall
 	searches       map[string]hongguoSearchEntry
 	searchPending  map[string]*hongguoSearchCall
+	suggestions    map[string]hongguoSuggestionEntry
+	suggestPending map[string]*hongguoSuggestionCall
 	danmaku        map[string]hongguoDanmakuCacheEntry
 	danmakuPending map[string]*hongguoDanmakuCall
 }
@@ -56,6 +58,7 @@ func (downloader *Downloader) hongguoClient() *hongguoAppClient {
 			state:   hongguoCatalogState{Version: 1, DeviceID: newHongguoDeviceID(), InstallID: newHongguoDeviceID(), Feeds: map[string]hongguoCatalogCursor{}},
 			details: map[string]hongguoDetailEntry{}, pending: map[string]*hongguoDetailCall{},
 			searches: map[string]hongguoSearchEntry{}, searchPending: map[string]*hongguoSearchCall{},
+			suggestions: map[string]hongguoSuggestionEntry{}, suggestPending: map[string]*hongguoSuggestionCall{},
 		}
 	})
 	return downloader.hongguo
@@ -71,6 +74,30 @@ func cloneHongguoCatalogState(state *hongguoCatalogState) *hongguoCatalogState {
 		cloned.Feeds[name] = cursor
 	}
 	return &cloned
+}
+
+func (downloader *Downloader) restoreHongguoCatalog(state *hongguoCatalogState) {
+	if state == nil || state.Version != 1 || !hongguoNumericID.MatchString(state.DeviceID) || !hongguoNumericID.MatchString(state.InstallID) {
+		return
+	}
+	cloned := cloneHongguoCatalogState(state)
+	for name, cursor := range cloned.Feeds {
+		known := false
+		for _, genre := range hongguoAppGenres {
+			known = known || name == genre.key || name == "category:"+genre.key
+		}
+		if !known || !cursor.Initialized || cursor.Offset < 0 || cursor.Offset > 1_000_000 || len(cursor.SessionID) > 4096 || len(cursor.LastID) > 256 || len(cursor.PageSignature) > 64 {
+			delete(cloned.Feeds, name)
+		}
+	}
+	client := downloader.hongguoClient()
+	client.catalogMu.Lock()
+	defer client.catalogMu.Unlock()
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.state.Feeds) == 0 {
+		client.state = *cloned
+	}
 }
 
 func (downloader *Downloader) hongguoCatalogSnapshot() *hongguoCatalogState {

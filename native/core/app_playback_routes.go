@@ -5,13 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"net/url"
 	"sort"
-	"strings"
 	"time"
 )
 
 type nativePlaybackChoice struct {
+	danmakuSeries string
+	danmakuVideo  string
 	media         []providerMedia
 	index         int
 	qualities     []int
@@ -63,8 +63,8 @@ func (engine *nativeEngine) nativeOpenPlayback(ctx context.Context, choice nativ
 		return nativePlan{}, errors.New("该集没有其他可用的播放线路")
 	}
 	media := choice.media[choice.index]
-	parsed, err := url.Parse(media.URL)
-	if err != nil || !isProviderHTTPMediaURL(media.URL) {
+	var err error
+	if !isProviderHTTPMediaURL(media.URL) {
 		return nativePlan{}, errors.New("站源未返回有效的播放地址")
 	}
 	tokenBytes := make([]byte, 24)
@@ -72,12 +72,19 @@ func (engine *nativeEngine) nativeOpenPlayback(ctx context.Context, choice nativ
 		return nativePlan{}, errors.New("无法初始化播放会话")
 	}
 	plan := nativePlan{
-		URL: media.URL, Headers: map[string]string{"User-Agent": userAgent, "Referer": media.Referer},
+		DanmakuID: choice.danmakuVideo,
+		URL:       media.URL, Headers: map[string]string{"User-Agent": userAgent, "Referer": media.Referer},
 		Key: hex.EncodeToString(media.CENCKey), Quality: media.Quality, Qualities: choice.qualities,
 		RouteIndex: choice.index, RouteCount: len(choice.media), Session: hex.EncodeToString(tokenBytes),
 	}
+	if media.credentials != nil && !media.credentials.expires.IsZero() {
+		if !time.Now().Before(media.credentials.expires) {
+			return nativePlan{}, errors.New("播放凭证已过期，请重新解析播放")
+		}
+		plan.ExpiresAt = media.credentials.expires.UnixMilli()
+	}
 	choice.streamSession = ""
-	if media.Playlist != "" || strings.HasSuffix(strings.ToLower(parsed.Path), ".m3u8") {
+	{
 		engine.mu.Lock()
 		if engine.stream == nil {
 			engine.stream, err = newNativeStreamServer(engine.downloader)

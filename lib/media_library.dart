@@ -12,6 +12,10 @@ import 'local_store.dart';
 import 'media_pipeline.dart';
 import 'models.dart';
 
+part 'media_merge_queue.dart';
+part 'media_merge.dart';
+part 'media_exports.dart';
+
 class LocalMediaItem {
   LocalMediaItem({
     required this.id,
@@ -26,8 +30,13 @@ class LocalMediaItem {
     this.audioTranscodes = 0,
     this.jobId = '',
     this.sourceVersion = '',
+    this.decodeVerified = false,
+    this.specialNumber = 0,
   });
   final String id, file, kind, jobId, sourceVersion;
+  final bool decodeVerified;
+  final int specialNumber;
+  bool get special => kind == 'special';
   final Drama drama;
   final List<int> episodes;
   final double duration;
@@ -47,6 +56,8 @@ class LocalMediaItem {
     'audioTranscodes': audioTranscodes,
     'jobId': jobId,
     'sourceVersion': sourceVersion,
+    'decodeVerified': decodeVerified,
+    'specialNumber': specialNumber,
   };
   factory LocalMediaItem.fromJson(Map<String, dynamic> value) {
     final file = value['file'] as String;
@@ -66,6 +77,8 @@ class LocalMediaItem {
       audioTranscodes: intValue(value['audioTranscodes']),
       jobId: value['jobId'] as String? ?? '',
       sourceVersion: value['sourceVersion'] as String? ?? '',
+      decodeVerified: value['decodeVerified'] == true,
+      specialNumber: intValue(value['specialNumber']),
     );
   }
 }
@@ -114,12 +127,31 @@ class MediaLibrary extends ChangeNotifier {
     this.store, {
     MediaExecutor? executor,
     this.automaticWorker = false,
-  }) : executor = executor ?? FFmpegExecutor();
+  }) : executor = executor ?? FFmpegExecutor() {
+    _observedEpoch = store.profileEpoch;
+    store.addListener(_accessChanged);
+  }
   final AppRepository repository;
   final LocalStore store;
   final MediaExecutor executor;
   final bool automaticWorker;
   static MediaLibrary? current;
+  MergeQueue? _merges;
+  MergeQueue get merges => _merges ??= MergeQueue(this);
+  int? _taskEpoch;
+  late int _observedEpoch;
+  Set<String> _taskSources = const {};
+  final _showFolders = <String, String>{};
+  final _specialNumbers = <String, int>{};
+
+  void _accessChanged() {
+    if (_observedEpoch != store.profileEpoch || !store.canDownload) {
+      _observedEpoch = store.profileEpoch;
+      unawaited(_merges?.pauseUnavailable() ?? Future<void>.value());
+      if (busy) unawaited(cancel());
+    }
+  }
+
   bool _disposed = false;
   @override
   void notifyListeners() {
@@ -136,6 +168,9 @@ class MediaLibrary extends ChangeNotifier {
   set suspended(bool value) {
     _suspended = value;
     _automatic?.suspended = value;
+    if (value) {
+      unawaited(_merges?.pauseUnavailable(all: true) ?? Future<void>.value());
+    }
   }
 
   String status = '', error = '';
@@ -184,24 +219,81 @@ class MediaLibrary extends ChangeNotifier {
     return file;
   }
 
-  Future<void> reload() async {
-    root = await repository.downloadDirectory();
-    if (root!.isEmpty) throw AppFailure('无法读取下载位置');
-    final file = File(path.join(root!, 'media-library.json'));
-    _items = [];
-    _skipped.clear();
+  Future<void> reload({bool duringTask = false}) async {
+    if (busy && !duringTask) return;
+    final directory = await repository.downloadDirectory();
+    if (directory.isEmpty) throw AppFailure('无法读取下载位置');
+    final file = File(path.join(directory, 'media-library.json'));
+    var items = <LocalMediaItem>[];
+    final skipped = <String>{},
+        folders = <String, String>{},
+        numbers = <String, int>{};
     if (await file.exists()) {
       if (await file.length() > 16 * 1024 * 1024) {
         throw AppFailure('本地媒体记录过大，原文件已保留');
       }
       final data = jsonDecode(await file.readAsString()) as Map;
-      _items = (data['items'] as List)
+      items = (data['items'] as List)
           .map(
-            (v) => LocalMediaItem.fromJson(Map<String, dynamic>.from(v as Map)),
+            (value) => LocalMediaItem.fromJson(
+              Map<String, dynamic>.from(value as Map),
+            ),
           )
           .toList();
-      _skipped.addAll((data['skipped'] as List? ?? []).cast<String>());
+      if (items.map((item) => item.id).toSet().length != items.length) {
+        throw AppFailure('本地媒体记录重复，原文件已保留');
+      }
+      skipped.addAll((data['skipped'] as List? ?? []).cast<String>());
+      for (final entry in (data['showFolders'] as Map? ?? {}).entries) {
+        final folder = entry.value as String;
+        if (!_validShowFolder(folder)) throw AppFailure('导出目录记录无效，原文件已保留');
+        folders[entry.key as String] = folder;
+      }
+      for (final entry in (data['specialNumbers'] as Map? ?? {}).entries) {
+        final number = intValue(entry.value);
+        if (number < 1 || number > 100000) throw AppFailure('特别篇编号无效，原文件已保留');
+        numbers[entry.key as String] = number;
+      }
+      for (final item in items.where((item) => !item.merged)) {
+        final folder = path.dirname(path.dirname(item.file));
+        if (_validShowFolder(folder)) {
+          folders.putIfAbsent(item.drama.id, () => folder);
+        }
+      }
+      if (folders.values.toSet().length != folders.length) {
+        throw AppFailure('不同剧集的导出目录冲突，原文件已保留');
+      }
+      for (final item in items.where(
+        (item) =>
+            item.special &&
+            item.specialNumber > 0 &&
+            item.id.startsWith('special-'),
+      )) {
+        numbers.putIfAbsent(
+          '${item.drama.id}\u0000${item.id.substring(8)}',
+          () => item.specialNumber,
+        );
+      }
+      final uniqueNumbers = <String>{};
+      for (final entry in numbers.entries) {
+        final show = entry.key.split('\u0000').first;
+        if (!uniqueNumbers.add('$show\u0000${entry.value}')) {
+          throw AppFailure('特别篇编号重复，原文件已保留');
+        }
+      }
     }
+    if (busy && !duringTask) return;
+    root = directory;
+    _items = items;
+    _skipped
+      ..clear()
+      ..addAll(skipped);
+    _showFolders
+      ..clear()
+      ..addAll(folders);
+    _specialNumbers
+      ..clear()
+      ..addAll(numbers);
     notifyListeners();
   }
 
@@ -213,24 +305,42 @@ class MediaLibrary extends ChangeNotifier {
   }
 
   Future<void> _save() async {
-    await _writeText(
-      File(path.join(root!, 'media-library.json')),
-      jsonEncode({
-        'items': _items.map((item) => item.toJson()).toList(),
-        'skipped': _skipped.toList(),
-      }),
-    );
+    final content = jsonEncode({
+      'items': _items.map((item) => item.toJson()).toList(),
+      'skipped': _skipped.toList(),
+      'showFolders': _showFolders,
+      'specialNumbers': _specialNumbers,
+    });
+    if (utf8.encode(content).length > 16 * 1024 * 1024) {
+      throw AppFailure('本地媒体记录已满，请先整理成品记录');
+    }
+    await _writeText(File(path.join(root!, 'media-library.json')), content);
   }
 
   void _check() {
-    if (_cancelled || suspended) throw AppFailure('已取消本地媒体处理');
+    if (_disposed ||
+        _cancelled ||
+        suspended ||
+        !store.canDownload ||
+        _taskEpoch != null && _taskEpoch != store.profileEpoch ||
+        _taskSources.any((source) => !store.allowsSource(source))) {
+      throw AppFailure('本地媒体处理已停止，原分集和恢复记录保留');
+    }
   }
 
   Future<T> _task<T>(
     String name,
-    Future<T> Function(Directory temporary) action,
-  ) async {
+    Future<T> Function(Directory temporary) action, {
+    String? workspace,
+    Set<String> sources = const {},
+  }) async {
     if (busy) throw AppFailure('已有本地媒体任务正在处理');
+    if (!store.canDownload ||
+        sources.any((source) => !store.allowsSource(source))) {
+      throw AppFailure('当前用户没有媒体处理权限');
+    }
+    _taskEpoch = store.profileEpoch;
+    _taskSources = sources;
     busy = true;
     status = name;
     error = '';
@@ -243,14 +353,22 @@ class MediaLibrary extends ChangeNotifier {
       if (!automaticWorker) await BackgroundDownloads.ensureStarted();
       await repository.workLease('media', 'start');
       lease = true;
-      await reload();
+      await reload(duringTask: true);
       for (final entry in Directory(root!).listSync(followLinks: false)) {
         if (entry is Directory &&
             path.basename(entry.path).startsWith('.media-work-')) {
           await entry.delete(recursive: true);
         }
       }
-      temporary = await Directory(root!).createTemp('.media-work-');
+      if (workspace != null) {
+        if (!RegExp(r'^[a-zA-Z0-9_-]{1,100}$').hasMatch(workspace)) {
+          throw AppFailure('合并任务编号无效');
+        }
+        temporary = Directory(path.join(root!, '.merge-work', workspace));
+        await temporary.create(recursive: true);
+      } else {
+        temporary = await Directory(root!).createTemp('.media-work-');
+      }
       _check();
       final result = await action(temporary);
       progress = 1;
@@ -261,7 +379,7 @@ class MediaLibrary extends ChangeNotifier {
       status = _cancelled ? '已取消' : '处理未完成';
       rethrow;
     } finally {
-      if (temporary != null && await temporary.exists()) {
+      if (workspace == null && temporary != null && await temporary.exists()) {
         try {
           await temporary.delete(recursive: true);
         } catch (_) {}
@@ -272,6 +390,8 @@ class MediaLibrary extends ChangeNotifier {
         } catch (_) {}
       }
       busy = false;
+      _taskEpoch = null;
+      _taskSources = const {};
       notifyListeners();
     }
   }
@@ -330,149 +450,13 @@ class MediaLibrary extends ChangeNotifier {
     return probe;
   }
 
-  Future<LocalMediaItem> merge(List<DownloadJob> selected) async {
-    final jobs = selected.where((job) => job.completed).toList()
-      ..sort((a, b) => a.episode.number.compareTo(b.episode.number));
-    if (jobs.length < 2 ||
-        jobs.map((job) => job.drama.id).toSet().length != 1 ||
-        jobs.map((job) => job.episode.number).toSet().length != jobs.length) {
-      throw AppFailure('请选择同一部剧至少两集已下载的视频');
-    }
-    return _task('准备合并', (temporary) async {
-      final prepared = <String>[], probes = <MediaProbe>[];
-      for (var i = 0; i < jobs.length; i++) {
-        final target = path.join(temporary.path, 'original-$i.mkv');
-        probes.add(
-          await _prepare(
-            jobs[i],
-            target,
-            .25 * i / jobs.length,
-            .25 / jobs.length,
-          ),
-        );
-        prepared.add(target);
-      }
-      final plan = MergePlan.create(probes);
-      final normalized = <String>[];
-      for (var i = 0; i < jobs.length; i++) {
-        _check();
-        status = plan.videoChanges[i]
-            ? '统一第 ${jobs[i].episode.number} 集视频格式'
-            : plan.audioChanges[i]
-            ? '统一第 ${jobs[i].episode.number} 集音轨'
-            : '保留第 ${jobs[i].episode.number} 集码流';
-        notifyListeners();
-        final target = path.join(
-          temporary.path,
-          'part-$i.${plan.transportStream ? 'ts' : 'mkv'}',
-        );
-        await executor.run(
-          plan.normalizeArguments(prepared[i], target, probes[i], i),
-          duration: probes[i].duration,
-          progress: (value) {
-            progress = .25 + .55 * (i + value) / jobs.length;
-            notifyListeners();
-          },
-        );
-        _check();
-        final checked = await executor.probe(target);
-        _check();
-        verifyMediaDuration(checked, probes[i].duration);
-        normalized.add(target);
-        await File(prepared[i]).delete();
-      }
-      _check();
-      status = '合并视频';
-      notifyListeners();
-      final list = File(path.join(temporary.path, 'concat.txt'));
-      await list.writeAsString(
-        'ffconcat version 1.0\n${normalized.map(concatFileLine).join('\n')}\n',
-        flush: true,
-      );
-      final output = path.join(temporary.path, 'full.mkv');
-      final duration = probes.fold<double>(
-        0,
-        (sum, probe) => sum + probe.duration,
-      );
-      await executor.run(
-        [
-          '-f',
-          'concat',
-          '-safe',
-          '0',
-          '-i',
-          list.path,
-          '-map',
-          '0:v:0',
-          '-map',
-          '0:a:0?',
-          '-c',
-          'copy',
-          '-avoid_negative_ts',
-          'make_zero',
-          output,
-        ],
-        duration: duration,
-        progress: (value) {
-          progress = .8 + value * .19;
-          notifyListeners();
-        },
-      );
-      _check();
-      final checked = await executor.probe(output);
-      _check();
-      verifyMediaDuration(checked, duration);
-      final id = 'merged-${DateTime.now().microsecondsSinceEpoch}';
-      final relative = path.join('library', id, 'full.mkv');
-      final target = File(path.join(root!, relative));
-      await target.parent.create(recursive: true);
-      await File(output).rename(target.path);
-      final item = LocalMediaItem(
-        id: id,
-        drama: jobs.first.drama,
-        file: relative,
-        kind: 'merged',
-        episodes: jobs.map((job) => job.episode.number).toList(),
-        duration: checked.duration,
-        bytes: await target.length(),
-        created: DateTime.now(),
-        videoTranscodes: plan.videoTranscodes,
-        audioTranscodes: plan.audioTranscodes,
-      );
-      _items.add(item);
-      try {
-        await _save();
-      } catch (_) {
-        _items.remove(item);
-        await target.parent.delete(recursive: true);
-        rethrow;
-      }
-      return item;
-    });
-  }
-
   String _sourceVersion(DownloadJob job) =>
-      '${job.created}-${job.bytes}-${job.actualQuality}';
+      '${job.created}-${job.bytes}-${job.actualQuality}'
+      '${job.revision > 0 ? '-${job.revision}' : ''}';
 
   Future<void> _exportMetadata(DownloadJob job, File target) async {
-    final showDirectory = target.parent.parent;
-    final poster = File(path.join(showDirectory.path, 'poster.jpg'));
-    var hasPoster = await poster.exists();
-    if (store.exportPosters &&
-        !hasPoster &&
-        !const bool.fromEnvironment('DISABLE_REMOTE_IMAGES')) {
-      try {
-        final cover = await repository.cover(job.drama);
-        _check();
-        await File(cover).copy(poster.path);
-        hasPoster = true;
-      } catch (_) {}
-    }
+    await _writeShowMetadata(job.drama, target.parent.parent);
     _check();
-    await _writeText(
-      File(path.join(showDirectory.path, 'tvshow.nfo')),
-      embyShowNfo(job.drama, localPoster: hasPoster),
-    );
     await _writeText(
       File(path.setExtension(target.path, '.nfo')),
       embyEpisodeNfo(job),
@@ -511,14 +495,7 @@ class MediaLibrary extends ChangeNotifier {
         _check();
         status = '导出第 ${job.episode.number} 集';
         notifyListeners();
-        final showId = sha256
-            .convert(utf8.encode(job.drama.id))
-            .toString()
-            .substring(0, 12);
-        final show = path.join(
-          'exports',
-          '${_safeName(job.drama.title)} [${job.drama.source}-$showId]',
-        );
+        final show = await _showDirectory(job.drama);
         final relative = path.join(
           show,
           'Season 01',
@@ -548,7 +525,7 @@ class MediaLibrary extends ChangeNotifier {
         progress = (i + 1) / jobs.length;
         notifyListeners();
       }
-    });
+    }, sources: jobs.map((job) => job.drama.source).toSet());
   }
 
   Future<void> maybeExport() async {
@@ -560,7 +537,7 @@ class MediaLibrary extends ChangeNotifier {
     }
     _checking = true;
     try {
-      if (automaticWorker) await store.preferences.reload();
+      if (automaticWorker) await store.reload();
       if (!store.autoExport) return;
       final jobs = await repository.downloads();
       if (!jobs.any((job) => job.completed)) return;
@@ -600,18 +577,11 @@ class MediaLibrary extends ChangeNotifier {
         if (await file.exists()) await file.delete();
         final metadata = File(path.setExtension(file.path, '.nfo'));
         if (await metadata.exists()) await metadata.delete();
-        _skipped.add(item.jobId);
+        if (item.jobId.isNotEmpty) _skipped.add(item.jobId);
       }
       _items.removeWhere((entry) => entry.id == item.id);
-      if (!item.merged &&
-          !_items.any(
-            (other) => !other.merged && other.drama.id == item.drama.id,
-          )) {
-        final show = file.parent.parent;
-        if (await show.exists()) await show.delete(recursive: true);
-      }
       await _save();
-    });
+    }, sources: {selected.drama.source});
   }
 
   @override
@@ -619,6 +589,8 @@ class MediaLibrary extends ChangeNotifier {
     _disposed = true;
     _cancelled = true;
     _timer?.cancel();
+    _merges?.dispose();
+    store.removeListener(_accessChanged);
     _automatic?.dispose();
     unawaited(executor.cancel());
     super.dispose();

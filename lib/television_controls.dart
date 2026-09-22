@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'models.dart';
+import 'playback_preferences.dart';
+import 'playback_buffer.dart';
 import 'remote_widgets.dart';
 import 'widgets.dart';
 
@@ -21,6 +23,7 @@ class TelevisionControls extends StatefulWidget {
     required this.onEpisodes,
     required this.onSettings,
     required this.onBack,
+    this.onPush,
   });
   final Player player;
   final String title;
@@ -32,6 +35,7 @@ class TelevisionControls extends StatefulWidget {
   final Future<void> Function() onEpisodes;
   final Future<void> Function() onSettings;
   final VoidCallback onBack;
+  final Future<void> Function()? onPush;
 
   @override
   State<TelevisionControls> createState() => _TelevisionControlsState();
@@ -42,6 +46,7 @@ class _TelevisionControlsState extends State<TelevisionControls> {
   final _play = FocusNode(debugLabel: 'tv-player-play');
   final _episodes = FocusNode(debugLabel: 'tv-player-episodes');
   final _settings = FocusNode(debugLabel: 'tv-player-settings');
+  final _push = FocusNode(debugLabel: 'tv-player-push');
   final _progress = FocusNode(debugLabel: 'tv-player-progress');
   final _subscriptions = <StreamSubscription<dynamic>>[];
   Timer? _hideTimer;
@@ -56,6 +61,7 @@ class _TelevisionControlsState extends State<TelevisionControls> {
     for (final stream in [
       widget.player.stream.position,
       widget.player.stream.duration,
+      widget.player.stream.buffer,
       widget.player.stream.playing,
       widget.player.stream.buffering,
     ]) {
@@ -211,7 +217,14 @@ class _TelevisionControlsState extends State<TelevisionControls> {
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }
-    for (final node in [_surface, _play, _episodes, _settings, _progress]) {
+    for (final node in [
+      _surface,
+      _play,
+      _episodes,
+      _settings,
+      _progress,
+      _push,
+    ]) {
       node.dispose();
     }
     super.dispose();
@@ -307,12 +320,31 @@ class _TelevisionControlsState extends State<TelevisionControls> {
                         onPressed: widget.onTogglePlayback,
                         child: Column(
                           children: [
-                            LinearProgressIndicator(
-                              value: duration > 0
-                                  ? (position / duration).clamp(0, 1)
-                                  : 0,
-                              minHeight: 5,
-                              backgroundColor: Colors.white24,
+                            Stack(
+                              children: [
+                                LinearProgressIndicator(
+                                  value: duration > 0
+                                      ? (state.buffer.inMilliseconds /
+                                                1000 /
+                                                duration)
+                                            .clamp(0, 1)
+                                      : 0,
+                                  minHeight: 5,
+                                  color: Colors.white38,
+                                  backgroundColor: Colors.white24,
+                                ),
+                                LinearProgressIndicator(
+                                  value: duration > 0
+                                      ? (position / duration).clamp(0, 1)
+                                      : 0,
+                                  minHeight: 5,
+                                  backgroundColor: Colors.transparent,
+                                ),
+                              ],
+                            ),
+                            PlaybackBufferStatus(
+                              player: widget.player,
+                              enabled: widget.enabled,
                             ),
                             const SizedBox(height: 10),
                             Row(
@@ -371,6 +403,15 @@ class _TelevisionControlsState extends State<TelevisionControls> {
                               onPressed: () =>
                                   _openPanel(widget.onEpisodes, _episodes),
                             ),
+                            if (widget.onPush != null)
+                              RemoteButton(
+                                key: const ValueKey('tv-lan-push'),
+                                label: '推送',
+                                icon: Icons.cast_rounded,
+                                focusNode: _push,
+                                onPressed: () =>
+                                    _openPanel(widget.onPush!, _push),
+                              ),
                             RemoteButton(
                               key: const ValueKey('tv-settings'),
                               label: '播放设置',
@@ -444,9 +485,18 @@ class TelevisionEpisodeDialog extends StatelessWidget {
 }
 
 class TelevisionPlaybackSetting {
-  const TelevisionPlaybackSetting({this.speed, this.quality});
+  const TelevisionPlaybackSetting({
+    this.speed,
+    this.quality,
+    this.autoAdvance,
+    this.danmaku,
+    this.preload,
+  });
   final double? speed;
   final int? quality;
+  final bool? autoAdvance;
+  final bool? danmaku;
+  final bool? preload;
 }
 
 class TelevisionSettingsDialog extends StatelessWidget {
@@ -457,12 +507,26 @@ class TelevisionSettingsDialog extends StatelessWidget {
     required this.qualities,
     required this.favorite,
     required this.onFavorite,
+    this.autoAdvance = true,
+    this.danmaku = true,
+    this.showDanmaku = false,
+    this.danmakuStatus = '',
+    this.onRetryDanmaku,
+    this.preload = true,
+    this.preloadStatus = '',
   });
   final double speed;
   final int quality;
   final List<int> qualities;
   final bool favorite;
   final VoidCallback onFavorite;
+  final bool autoAdvance;
+  final bool danmaku;
+  final bool showDanmaku;
+  final String danmakuStatus;
+  final VoidCallback? onRetryDanmaku;
+  final bool preload;
+  final String preloadStatus;
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -480,7 +544,7 @@ class TelevisionSettingsDialog extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final value in const [.75, 1.0, 1.25, 1.5, 2.0])
+                for (final value in playbackSpeeds)
                   RemoteButton(
                     key: ValueKey('tv-speed-$value'),
                     label: '${value}x',
@@ -515,6 +579,45 @@ class TelevisionSettingsDialog extends StatelessWidget {
                   ),
               ],
             ),
+            const SizedBox(height: 20),
+            if (showDanmaku) ...[
+              RemoteButton(
+                key: const ValueKey('tv-danmaku-enabled'),
+                label: danmaku ? '弹幕：开' : '弹幕：关',
+                onPressed: () => Navigator.pop(
+                  context,
+                  TelevisionPlaybackSetting(danmaku: !danmaku),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(danmakuStatus, style: const TextStyle(fontSize: 14)),
+              if (onRetryDanmaku != null)
+                RemoteButton(
+                  key: const ValueKey('tv-danmaku-retry'),
+                  label: '重试弹幕',
+                  onPressed: onRetryDanmaku,
+                ),
+              const SizedBox(height: 20),
+            ],
+            RemoteButton(
+              key: const ValueKey('tv-auto-advance'),
+              label: autoAdvance ? '自动连播：开' : '自动连播：关',
+              onPressed: () => Navigator.pop(
+                context,
+                TelevisionPlaybackSetting(autoAdvance: !autoAdvance),
+              ),
+            ),
+            const SizedBox(height: 16),
+            RemoteButton(
+              key: const ValueKey('tv-preload-enabled'),
+              label: preload ? '下一集预加载：开' : '下一集预加载：关',
+              onPressed: () => Navigator.pop(
+                context,
+                TelevisionPlaybackSetting(preload: !preload),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(preloadStatus, style: const TextStyle(fontSize: 14)),
             const SizedBox(height: 20),
             RemoteButton(
               label: favorite ? '取消追剧' : '加入追剧',

@@ -15,7 +15,7 @@ func TestNativeMetadataPreservesIdentityAndCover(t *testing.T) {
 	drama := nativeNormalize(Drama{ID: "hongguo:7399988776655443322", Title: "合成测试剧",
 		Cover: map[string]any{"url": "https://example.test/poster.webp"}, TotalEpisode: json.Number("24"), VIP: &value})
 	if drama.ID != "hongguo:7399988776655443322" || drama.SourceID != "7399988776655443322" ||
-		drama.Cover != "https://example.test/poster.webp" || drama.Episodes != 24 || !drama.VIP {
+		drama.Cover != "https://example.test/poster.webp" || drama.Episodes != 24 || drama.VIP == nil || !*drama.VIP {
 		t.Fatalf("metadata lost: %+v", drama)
 	}
 }

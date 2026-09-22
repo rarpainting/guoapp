@@ -36,9 +36,11 @@ class MediaProbe {
       ? 'none'
       : [
           audio['codec_name'],
+          audio['profile'] ?? 'unknown',
           audio['sample_rate'],
           audio['channels'],
           audio['channel_layout'],
+          audio['extradata_hash'] ?? 'unknown',
         ].join('|');
 }
 
@@ -49,12 +51,14 @@ class MergePlan {
     this.videoChanges,
     this.audioChanges,
     this.transportStream,
+    this.canonicalAac,
   );
   final MediaProbe video;
   final MediaProbe? audio;
   final List<bool> videoChanges;
   final List<bool> audioChanges;
   final bool transportStream;
+  final bool canonicalAac;
   int get videoTranscodes => videoChanges.where((change) => change).length;
   int get audioTranscodes => audioChanges.where((change) => change).length;
 
@@ -91,9 +95,12 @@ class MergePlan {
     final vc = probes
         .map((p) => p.videoSignature != video.videoSignature)
         .toList();
-    final ac = probes
+    var ac = probes
         .map((p) => audio != null && p.audioSignature != audio.audioSignature)
         .toList();
+    final canonicalAac =
+        audio?.audio['codec_name'] == 'aac' && ac.any((change) => change);
+    if (canonicalAac) ac = List.filled(probes.length, true);
     if (vc.any((v) => v) && !{'h264', 'hevc'}.contains(video.videoCodec)) {
       throw AppFailure('多数分集为 ${video.videoCodec}，当前不能将其他格式转换为此编码；原文件已保留。');
     }
@@ -133,7 +140,7 @@ class MergePlan {
         )) {
       throw AppFailure('视频编码参数不适合直接拼接，可保留分集并导出 Emby。');
     }
-    return MergePlan._(video, audio, vc, ac, transport);
+    return MergePlan._(video, audio, vc, ac, transport, canonicalAac);
   }
 
   List<String> normalizeArguments(
@@ -193,6 +200,7 @@ class MergePlan {
           '-ac',
           '${audio!.audio['channels']}',
         ]);
+        if (canonicalAac) args.addAll(['-profile:a', 'aac_low']);
         if ({
           'aac',
           'ac3',
@@ -321,6 +329,7 @@ class FFmpegExecutor implements MediaExecutor {
 
 void verifyMediaDuration(MediaProbe probe, double expected) {
   if (probe.videoCodec.isEmpty ||
+      !probe.duration.isFinite ||
       probe.duration <= 0 ||
       expected > 0 &&
           (probe.duration - expected).abs() > max(2, expected * .02)) {

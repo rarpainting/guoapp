@@ -28,7 +28,7 @@ void main() {
       expect(find.text(allSourcesEnabled ? '真果鉴' : '红果鉴'), findsOneWidget);
       expect(appSlug, allSourcesEnabled ? 'zhenguojian' : 'hongguojian');
       expect(repository.requests, [allSourcesEnabled ? 'huangdou' : 'hongguo']);
-      expect(store.sources.length, allSourcesEnabled ? 4 : 1);
+      expect(store.sources.length, allSourcesEnabled ? 5 : 1);
       for (final source in SourceSite.knownValues.skip(1)) {
         expect(
           find.text(source.name),
@@ -135,6 +135,9 @@ void main() {
         for (final request in [
           () => repository.catalog(source),
           () => repository.cached(source),
+          () => repository.sourceStatus(source),
+          () => repository.startSourceJob(source, 'update'),
+          () => repository.cancelSourceJob(source),
           () => repository.detail(drama),
           () => repository.cover(drama),
           () => repository.resolve(drama, episode),

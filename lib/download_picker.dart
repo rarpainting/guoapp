@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'app_layout.dart';
 import 'models.dart';
-import 'remote_widgets.dart';
+import 'download_preferences.dart';
+import 'episode_browser.dart';
 
 class DownloadSelection {
   const DownloadSelection(this.episodes, this.quality);
@@ -11,8 +11,13 @@ class DownloadSelection {
 }
 
 class DownloadPicker extends StatefulWidget {
-  const DownloadPicker({super.key, required this.detail});
+  const DownloadPicker({
+    super.key,
+    required this.detail,
+    this.preferences = const DownloadPreferences(),
+  });
   final DramaDetail detail;
+  final DownloadPreferences preferences;
 
   @override
   State<DownloadPicker> createState() => _DownloadPickerState();
@@ -20,17 +25,23 @@ class DownloadPicker extends StatefulWidget {
 
 class _DownloadPickerState extends State<DownloadPicker> {
   late final _selected = widget.detail.episodes
-      .where((episode) => !episode.vip)
+      .where((episode) => widget.preferences.includeVip || !episode.vip)
       .take(500)
       .map((episode) => episode.number)
       .toSet();
-  int _quality = 0;
+  late int _quality = widget.preferences.quality;
 
   void _select(Iterable<Episode> episodes) {
+    final choices = episodes.toList();
     setState(() {
       _selected.clear();
-      _selected.addAll(episodes.take(500).map((episode) => episode.number));
+      _selected.addAll(choices.take(500).map((episode) => episode.number));
     });
+    if (choices.length > 500) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已选前 500 集；可清空后按分组选择其他集数，或从发现页使用整剧批量下载')),
+      );
+    }
   }
 
   void _toggle(Episode episode) {
@@ -48,12 +59,31 @@ class _DownloadPickerState extends State<DownloadPicker> {
   @override
   Widget build(BuildContext context) {
     final episodes = widget.detail.episodes;
-    final television = AppLayout.isTelevision(context);
     final hasVip = episodes.any(
       (episode) => episode.vip && _selected.contains(episode.number),
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('下载选集')),
+      appBar: AppBar(
+        title: const Text('下载选集'),
+        actions: [
+          TextButton(
+            onPressed: () => _select(episodes),
+            child: const Text('全选'),
+          ),
+          PopupMenuButton<String>(
+            tooltip: '选择范围',
+            onSelected: (value) => _select(
+              value == 'free'
+                  ? episodes.where((e) => !e.vip)
+                  : const <Episode>[],
+            ),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'clear', child: Text('清空选择')),
+              PopupMenuItem(value: 'free', child: Text('仅非 VIP')),
+            ],
+          ),
+        ],
+      ),
       body: SafeArea(
         top: false,
         child: Center(
@@ -80,19 +110,7 @@ class _DownloadPickerState extends State<DownloadPicker> {
                     spacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      TextButton(
-                        onPressed: () => _select(episodes),
-                        child: const Text('全选'),
-                      ),
-                      TextButton(
-                        onPressed: () => _select(const []),
-                        child: const Text('清空'),
-                      ),
-                      TextButton(
-                        onPressed: () =>
-                            _select(episodes.where((episode) => !episode.vip)),
-                        child: const Text('仅非 VIP'),
-                      ),
+                      const Text('画质'),
                       DropdownButton<int>(
                         key: const ValueKey('download-quality'),
                         value: _quality,
@@ -133,35 +151,11 @@ class _DownloadPickerState extends State<DownloadPicker> {
                     ),
                   ),
                 Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) => RemoteGrid(
-                      itemKeys: episodes
-                          .map((episode) => 'pick-${episode.number}')
-                          .toList(),
-                      columns:
-                          ((constraints.maxWidth - 36) /
-                                  (television ? 100 : 76))
-                              .floor()
-                              .clamp(1, 10),
-                      itemExtent: television ? 66 : 58,
-                      spacing: 8,
-                      itemBuilder: (_, index, node, onFocus) {
-                        final episode = episodes[index];
-                        final selected = _selected.contains(episode.number);
-                        return Semantics(
-                          selected: selected,
-                          child: RemoteEpisodeButton(
-                            key: ValueKey('download-episode-${episode.number}'),
-                            number: episode.number,
-                            vip: episode.vip,
-                            current: selected,
-                            focusNode: node,
-                            onFocus: onFocus,
-                            onPressed: () => _toggle(episode),
-                          ),
-                        );
-                      },
-                    ),
+                  child: EpisodeBrowser(
+                    episodes: episodes,
+                    selectedNumbers: _selected,
+                    keyPrefix: 'download-episode',
+                    onSelected: (index) => _toggle(episodes[index]),
                   ),
                 ),
                 Padding(
