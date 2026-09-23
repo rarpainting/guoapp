@@ -1,6 +1,6 @@
 # 红果鉴 / 真果鉴
 
-Flutter 多端独立短剧应用，原名“短剧库 APP”。站源请求、解析、下载和播放均在设备上完成，不依赖旧项目或自建服务。当前源码版本：**0.2.27+33（未验证开发快照）**。本轮去掉帝果 VIP 标记分集的播放确认弹窗，点击后直接进入播放器解析；其它站源的 VIP 试看提示保持不变。0.2.26 已参考 `/Users/macbookpro/Downloads/dsd-video-parser` 重新实现帝果播放解析：原生核心会经 `/addons/vplayer/` 解 aaencode 签名脚本取得 `vPath`，并恢复全站源版帝果入口；真实播放、下载与平台行为仍待集中验证。0.2.24 已按移动端和电视端实测卡顿反馈，将画质增强收窄为仅 Windows 桌面端可见和可运行；Android 手机、Android TV 与 iOS 均隐藏入口并不初始化增强链路。0.2.23 已修正播放器全屏控制栏层级：顶部只保留返回与标题，播放、进度、选集、设置、画中画和全屏统一收在底部控制区；全屏设置与选集弹窗保持深色。0.2.22 已修正移动端竖屏播放页布局，选集默认折叠为入口，不再像详情页一样常驻铺开。0.2.21 已修正播放器主题跟随、画质增强设置展开逻辑、原画对比可用条件和 Android 自动档增强策略，并按当前前台 Android App 进程定位日志。0.2.20 已接入 Android 手机/平板播放器画中画入口、原生 PiP 桥接和进入画中画时的播放保活；Windows、Android TV 与 iOS 暂未接入系统级画中画。0.2.19 已将该站源面向用户的显示名统一改为“剧果”，内部站源标识仍保留 `huangju` 以兼容已有缓存、权限和同步记录。当前已生成红果鉴和真果鉴两份 Android ARM64 Release 包 `0.2.27+33`，尚未安装到设备验收。
+Flutter 多端独立短剧应用，原名“短剧库 APP”。站源请求、解析、下载和播放均在设备上完成，不依赖旧项目或自建服务。当前源码版本：**0.2.27+33（未验证开发快照）**。本轮去掉帝果 VIP 标记分集的播放确认弹窗，点击后直接进入播放器解析；其它站源的 VIP 试看提示保持不变。0.2.26 已参考 `/Users/macbookpro/Downloads/dsd-video-parser` 重新实现帝果播放解析：原生核心会经 `/addons/vplayer/` 解 aaencode 签名脚本取得 `vPath`，并恢复全站源版帝果入口；真实播放、下载与平台行为仍待集中验证。0.2.24 已按移动端和电视端实测卡顿反馈，将画质增强收窄为仅 Windows 桌面端可见和可运行；Android 手机、Android TV 与 iOS 均隐藏入口并不初始化增强链路。0.2.23 已修正播放器全屏控制栏层级：顶部只保留返回与标题，播放、进度、选集、设置、画中画和全屏统一收在底部控制区；全屏设置与选集弹窗保持深色。0.2.22 已修正移动端竖屏播放页布局，选集默认折叠为入口，不再像详情页一样常驻铺开。0.2.21 已修正播放器主题跟随、画质增强设置展开逻辑、原画对比可用条件和 Android 自动档增强策略，并按当前前台 Android App 进程定位日志。0.2.20 已接入 Android 手机/平板播放器画中画入口、原生 PiP 桥接和进入画中画时的播放保活；Windows、Android TV 与 iOS 暂未接入系统级画中画。0.2.19 已将该站源面向用户的显示名统一改为“剧果”，内部站源标识仍保留 `huangju` 以兼容已有缓存、权限和同步记录。当前已生成红果鉴和真果鉴的 Android ARM64 / ARMv7 Release 包 `0.2.27+33`，尚未安装到设备验收。
 
 按用户 2026-09-21 的要求，继续暂停整体验证。启动、榜单、画质增强、站源改名、画中画、帝果解析重做和本轮帝果播放确认调整已完成源码实现、依赖锁定、格式整理、收尾同步及两版 Android ARM64 Release 打包与包级检查；未安装到设备或执行播放回归。帝果播放问题按本次追加要求迁移参考项目公开解析链路并取消前置确认；不实现或测试绕过 VIP / 试看限制。历史版本的检查记录不能作为本轮新增功能的验收结论。
 
@@ -602,11 +602,11 @@ SR-1、SR-2 与 SR-4 已接入源码，小型动漫 CNN 也包含在本轮；SR-
 
 ## 安装包与平台状态
 
-0.2.27+33 已完成红果鉴与真果鉴两版 Android ARM64 Release 打包与包级检查，ARM64 分包版本码为 2033。仓库没有 `key.properties`，两包按既有配置沿用 Android Debug 证书；证书指纹与此前本地包一致，可覆盖同证书旧包，但不等同正式生产签名。Windows / iOS 完整应用仍待相应平台构建，本轮没有进行设备运行确认。
+0.2.27+33 已完成红果鉴与真果鉴的 Android ARM64 / ARMv7 Release 打包与包级检查，ARM64 分包版本码为 2033，ARMv7 为 1033。仓库没有 `key.properties`，四包按既有配置沿用 Android Debug 证书；证书指纹与此前本地包一致，可覆盖同证书、同架构的旧包，但不等同正式生产签名。Windows / iOS 完整应用仍待相应平台构建，本轮没有进行设备运行确认。
 
 | 平台 | 包与状态 |
 | --- | --- |
-| Android 8.0+ 手机 | 0.2.27+33 提供两版 `arm64-v8a` APK；ARMv7 / x86_64 构建脚本保留，目前仅有历史版本安装包 |
+| Android 8.0+ 手机 | 0.2.27+33 提供红果鉴 / 真果鉴各自的 `arm64-v8a` 与 `armeabi-v7a` APK；x86_64 构建脚本保留，目前仅有历史版本安装包 |
 | Windows 10/11 x64 | 完整 ZIP 解压后运行 `hongguojian.exe`，全站源版为 `zhenguojian.exe`，保留所有 DLL 和 `data`；局域网原生发现依赖 Windows 10 1903+。完整包运行需 Windows / Actions，新增设备互联未验证 |
 | Android TV | 与手机共用 APK，旧版电视界面与遥控有自动化记录；0.2.12 选集 / 设置及 0.2.13 同步 / 推送操作未验证，待电视实机验收 |
 | iOS 15.1+ | 已加入工程、Go 核心链接、媒体依赖、文件管理、系统代理桥接、Bonjour / 局域网权限和构建脚本；待 Xcode 构建与真机验收，没有已签名 IPA |
@@ -614,7 +614,9 @@ SR-1、SR-2 与 SR-4 已接入源码，小型动漫 CNN 也包含在本轮；SR-
 | 当前版本 0.2.27 | 安装包 | 大小 |
 | --- | --- | --- |
 | 红果鉴，仅红果 | `dist/android/hongguojian-0.2.27+33-arm64-v8a.apk` | 31.1 MB |
+| 红果鉴，仅红果，32 位 ARMv7 | `dist/android/hongguojian-0.2.27+33-armeabi-v7a.apk` | 39.7 MB |
 | 真果鉴，全部站源 | `dist/android/zhenguojian-0.2.27+33-arm64-v8a.apk` | 31.1 MB |
+| 真果鉴，全部站源，32 位 ARMv7 | `dist/android/zhenguojian-0.2.27+33-armeabi-v7a.apk` | 39.7 MB |
 
 两份安装包的 SHA256 校验值保存在 `dist/android/SHA256SUMS.txt`。应用名称、包名、版本、签名、包 CRC、ZIP 对齐和对应原生核心均已核对；实际运行行为仍待安装验收。
 
@@ -760,7 +762,7 @@ python3 scripts/finish_task.py --message "本次实际完成的变更"
 python3 scripts/sync_source.py --check
 ~~~
 
-尚未完成集中验证和平台验收时，使用带 `unverified` 的开发快照 tag。本轮源码快照为 `v0.2.27-unverified`，Android 打包记录快照为 `v0.2.27-unverified-android`，均表示源码可恢复，不标为完成验收的正式版本。帝果 vplayer 解析与入口恢复源码快照 `v0.2.26-unverified`、帝果入口隐藏源码快照 `v0.2.25-unverified`、移动端画质增强隐藏源码快照 `v0.2.24-unverified`、全屏播放器控制栏源码快照 `v0.2.23-unverified`、竖屏播放页修正源码快照 `v0.2.22-unverified`、播放器主题与增强策略源码快照 `v0.2.21-unverified`、画中画源码快照 `v0.2.20-unverified`、剧果显示名源码快照 `v0.2.19-unverified`、画质增强源码快照 `v0.2.18-unverified`、野果与帝果站源快照 `v0.2.17-unverified`、剧果站源与榜单位置调整快照 `v0.2.16-unverified`、首页布局与 Android 打包快照 `v0.2.15-unverified`、启动修复快照 `v0.2.14-unverified`、局域网同步与推送快照 `v0.2.13-unverified`、界面与媒体流程快照 `v0.2.12-unverified`、红果弹幕快照 `v0.2.11-unverified`、0.2.10 功能快照 `v0.2.10-unverified` 与打包修复 `v0.2.10-unverified-task-20260921-055042` 保留。源码同步一致性确认仍执行。
+尚未完成集中验证和平台验收时，使用带 `unverified` 的开发快照 tag。本轮源码快照为 `v0.2.27-unverified`，Android ARM64 打包记录快照为 `v0.2.27-unverified-android`，追加 ARMv7 打包记录快照为 `v0.2.27-unverified-android-armv7`，均表示源码可恢复，不标为完成验收的正式版本。帝果 vplayer 解析与入口恢复源码快照 `v0.2.26-unverified`、帝果入口隐藏源码快照 `v0.2.25-unverified`、移动端画质增强隐藏源码快照 `v0.2.24-unverified`、全屏播放器控制栏源码快照 `v0.2.23-unverified`、竖屏播放页修正源码快照 `v0.2.22-unverified`、播放器主题与增强策略源码快照 `v0.2.21-unverified`、画中画源码快照 `v0.2.20-unverified`、剧果显示名源码快照 `v0.2.19-unverified`、画质增强源码快照 `v0.2.18-unverified`、野果与帝果站源快照 `v0.2.17-unverified`、剧果站源与榜单位置调整快照 `v0.2.16-unverified`、首页布局与 Android 打包快照 `v0.2.15-unverified`、启动修复快照 `v0.2.14-unverified`、局域网同步与推送快照 `v0.2.13-unverified`、界面与媒体流程快照 `v0.2.12-unverified`、红果弹幕快照 `v0.2.11-unverified`、0.2.10 功能快照 `v0.2.10-unverified` 与打包修复 `v0.2.10-unverified-task-20260921-055042` 保留。源码同步一致性确认仍执行。
 
 局域网自动连接、记录自动同步与推送播放的早期方案文档快照 `v0.2.12-unverified-lan-design` 保留；该历史快照仅有设计，0.2.13 才接入实现。
 
@@ -923,7 +925,7 @@ git switch -c restore-v0.2.3 v0.2.3
 
 ### 当前检查与平台状态
 
-0.2.27+33 使用 Flutter 3.47.5 和提交锁定的国内镜像依赖，完成红果鉴 / 真果鉴两版 Android ARM64 Release 构建。两包均为版本码 2033、Android 8.0+、target SDK 36、仅 ARM64、`debuggable=false`，各含 17 个 DEFLATE 原生库；包 CRC、SHA256、16 KiB ZIP / ELF 页对齐、v2 签名、应用名称 / 包名和两版 Dart / Go 核心差异均已核对。红果鉴 SHA-256 为 `efe52350246d6280ff4ef6e831ea019fc51781c95f5950aa4ed81c59bcf96733`，真果鉴为 `2685cc84f1face3105f50e1971004a997c5b41d03b582394afbba29647351c70`。签名沿用与旧包一致的 Android Debug 证书，不是正式生产签名；未安装到设备，未执行自动化测试、播放回归或真实站源验证。
+0.2.27+33 使用 Flutter 3.47.5 和提交锁定的国内镜像依赖，完成红果鉴 / 真果鉴的 Android ARM64 与 ARMv7 Release 构建。ARM64 包版本码为 2033，仅含 `arm64-v8a`，各有 17 个 DEFLATE 原生库；ARMv7 包版本码为 1033，仅含 `armeabi-v7a`，各有 25 个 DEFLATE 原生库，Go 核心为 ELF32 / ARM。四包均为 Android 8.0+、target SDK 36、`debuggable=false`；包 CRC、SHA256、16 KiB ZIP / ELF 页对齐、v2 签名、应用名称 / 包名和两版 Dart / Go 核心差异均已核对。ARM64 红果鉴 SHA-256 为 `efe52350246d6280ff4ef6e831ea019fc51781c95f5950aa4ed81c59bcf96733`，真果鉴为 `2685cc84f1face3105f50e1971004a997c5b41d03b582394afbba29647351c70`；ARMv7 红果鉴为 `6d0b09fe4d98e0e81b997a55c7c1b118d6dcce3803759e4afc79b96ee4f4e6b7`，真果鉴为 `099e11ffc11e82bff86175b0ef0bbb471dc4ae7a1fe4db25d39690d1b6ab4699`。签名沿用与旧包一致的 Android Debug 证书，不是正式生产签名；未安装到设备，未执行自动化测试、播放回归或真实站源验证。
 
 0.2.24+30 按移动端和电视端画质增强卡死反馈，将画质增强功能收窄为仅 Windows 桌面端可见和可运行；Android 手机、Android TV 与 iOS 均不再显示画质增强、画面类型和原画对比入口，也不初始化 mpv 增强后端，已保存偏好保留给 Windows 使用。本轮已生成全站源版 Android arm64 release 包 `dist/android/zhenguojian-0.2.24+30-arm64-v8a.apk`，SHA-256 为 `c0a7d3c4469042d9a0cfcf0d6b01ed865db5e7580d552b7e3a27b1f582dfe9b7`；未安装到设备，未执行完整回归。
 
