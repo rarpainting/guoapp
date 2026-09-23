@@ -1,10 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 export 'app_build.dart';
 
-const appVersion = '0.2.27';
+const appVersion = '0.2.30';
 
 ThemeData televisionTheme(ThemeData theme) {
   final colors = theme.colorScheme;
@@ -47,20 +49,31 @@ class AppDevice {
   final String version;
   static const channel = MethodChannel('duanju/device');
 
-  static Future<AppDevice> detect() async {
+  static Future<AppDevice> detect({
+    AppDevice fallback = const AppDevice(),
+  }) async {
     if (defaultTargetPlatform != TargetPlatform.android) {
       return const AppDevice();
     }
     try {
-      final data = await channel.invokeMapMethod<String, dynamic>('deviceInfo');
+      final data = await channel
+          .invokeMapMethod<String, dynamic>('deviceInfo')
+          .timeout(const Duration(seconds: 2));
+      final television = data?['television'];
+      if (television is! bool) return fallback;
+      final version = data?['version'];
       return AppDevice(
-        television: data?['television'] == true,
-        version: data?['version'] as String? ?? appVersion,
+        television: television,
+        version: version is String && version.isNotEmpty
+            ? version
+            : fallback.version,
       );
     } on PlatformException {
-      return const AppDevice();
+      return fallback;
     } on MissingPluginException {
-      return const AppDevice();
+      return fallback;
+    } on TimeoutException {
+      return fallback;
     }
   }
 }

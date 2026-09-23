@@ -16,6 +16,7 @@ class PlayerControls extends StatefulWidget {
     required this.interactions,
     required this.enabled,
     required this.fullscreen,
+    required this.showOnPlaybackReady,
     required this.onFullscreen,
     required this.onPrevious,
     required this.onNext,
@@ -40,6 +41,7 @@ class PlayerControls extends StatefulWidget {
   final PlayerInteractions interactions;
   final bool enabled;
   final bool fullscreen;
+  final bool showOnPlaybackReady;
   final VoidCallback onFullscreen;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
@@ -67,11 +69,16 @@ class _PlayerControlsState extends State<PlayerControls> {
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   Timer? _hideTimer;
   bool _visible = true;
+  bool _suppressAutoPlaybackStart = false;
+  bool _lastPlaying = false;
   double? _seekValue;
 
   @override
   void initState() {
     super.initState();
+    _visible = widget.showOnPlaybackReady;
+    _suppressAutoPlaybackStart = !widget.showOnPlaybackReady;
+    _lastPlaying = widget.player.state.playing;
     for (final stream in [
       widget.player.stream.position,
       widget.player.stream.duration,
@@ -86,7 +93,23 @@ class _PlayerControlsState extends State<PlayerControls> {
         }),
       );
     }
-    _subscriptions.add(widget.player.stream.playing.listen((_) => _show()));
+    _subscriptions.add(
+      widget.player.stream.playing.listen((playing) {
+        final wasPlaying = _lastPlaying;
+        _lastPlaying = playing;
+        if (!mounted || !widget.enabled) return;
+        if (!playing) {
+          _show();
+        } else if (!wasPlaying) {
+          if (_suppressAutoPlaybackStart) {
+            _suppressAutoPlaybackStart = false;
+            _scheduleHide();
+          } else {
+            _show();
+          }
+        }
+      }),
+    );
     widget.interactions.addListener(_interactionChanged);
     _scheduleHide();
   }
@@ -96,9 +119,27 @@ class _PlayerControlsState extends State<PlayerControls> {
     super.didUpdateWidget(oldWidget);
     if (widget.enabled != oldWidget.enabled ||
         widget.panelOpen != oldWidget.panelOpen ||
-        widget.fullscreen != oldWidget.fullscreen) {
+        widget.fullscreen != oldWidget.fullscreen ||
+        widget.showOnPlaybackReady != oldWidget.showOnPlaybackReady) {
       _seekValue = null;
-      _visible = true;
+      if (widget.showOnPlaybackReady) {
+        _suppressAutoPlaybackStart = false;
+      } else if (widget.enabled && !oldWidget.enabled) {
+        _suppressAutoPlaybackStart = !widget.player.state.playing;
+      } else if (!widget.enabled && oldWidget.enabled) {
+        _suppressAutoPlaybackStart = true;
+        _visible = false;
+      }
+      if (widget.enabled && !oldWidget.enabled) {
+        if (widget.showOnPlaybackReady || !widget.player.state.playing) {
+          _visible = true;
+        } else {
+          _visible = false;
+        }
+      } else if (widget.panelOpen != oldWidget.panelOpen ||
+          widget.fullscreen != oldWidget.fullscreen) {
+        _visible = true;
+      }
       _scheduleHide();
     }
   }
