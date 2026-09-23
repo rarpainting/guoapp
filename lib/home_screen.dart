@@ -94,7 +94,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final names = online.map((source) => source.name).join('、');
     return online.length == _group.sources.length
-        ? '搜索${names}短剧'
+        ? '搜索$names'
         : '搜索${names}及本机剧库';
   }
 

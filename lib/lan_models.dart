@@ -90,20 +90,14 @@ const lanLegacySources = {
 
 Set<String> lanSources(Object? value, {bool advertised = false}) {
   if (value is! List ||
-      value.length > (advertised ? 32 : SourceSite.knownValues.length)) {
+      value.length > (advertised ? 32 : SourceSite.allValues.length)) {
     throw const FormatException('设备站源范围无效');
   }
   final result = value.map((source) => lanText(source, 32)).toSet();
   if (advertised) {
-    return result
-        .where(
-          (source) => SourceSite.knownValues.any((site) => site.id == source),
-        )
-        .toSet();
+    return result.where(SourceSite.isKnown).toSet();
   }
-  if (result.any(
-    (source) => !SourceSite.knownValues.any((site) => site.id == source),
-  )) {
+  if (result.any((source) => !SourceSite.isKnown(source))) {
     throw const FormatException('设备站源范围无效');
   }
   return result;
@@ -207,8 +201,9 @@ class LanIncomingPlayback {
   Future<void> Function()? stop;
 
   void fail(String message) {
-    if (!started.isCompleted)
+    if (!started.isCompleted) {
       started.complete({'state': 'failed', 'message': message});
+    }
   }
 
   void acknowledge(double position) {

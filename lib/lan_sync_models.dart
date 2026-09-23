@@ -180,7 +180,7 @@ class LanCell {
 Drama lanDrama(Object? input) {
   final row = lanMap(input);
   final source = lanText(row['source'], 32);
-  if (!SourceSite.knownValues.any((site) => site.id == source)) {
+  if (!SourceSite.isKnown(source)) {
     throw const FormatException('记录站源无效');
   }
   final id = lanText(row['id'], 512);
@@ -430,8 +430,9 @@ class LanDocument {
     final document = LanDocument(replica: replica, counter: counter);
     for (final raw in rows) {
       final record = LanRecord.fromJson(raw);
-      if (document.records.containsKey(record.id))
+      if (document.records.containsKey(record.id)) {
         throw const FormatException('同步记录重复');
+      }
       document.records[record.id] = record;
       for (final cell in record.fields.values) {
         document.counter = max(

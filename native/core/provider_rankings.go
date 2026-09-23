@@ -146,12 +146,7 @@ func (d *Downloader) loadRankingPage(ctx context.Context, board rankingBoard, pa
 func (d *Downloader) fetchRankingPage(ctx context.Context, board rankingBoard, page int) (rankingPage, error) {
 	switch board.Source {
 	case sourceHongguo:
-		pageURL := d.providerBaseURL(sourceHongguo) + "/rank/" + board.path + "?page=" + strconv.Itoa(page)
-		body, err := d.fetchProviderText(ctx, pageURL, d.providerBaseURL(sourceHongguo)+"/")
-		if err != nil {
-			return rankingPage{}, err
-		}
-		return parseHongguoRanking(body, board, page)
+		return d.fetchHongguoRankingPage(ctx, board, page)
 	case sourceHuangdou:
 		var decoded any
 		err := newHuangdouAPIClient(d).call(ctx, "/drama/rank", map[string]any{"tab": board.upstreamKey, "page": strconv.Itoa(page)}, &decoded)

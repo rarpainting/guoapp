@@ -237,7 +237,8 @@ class _DetailScreenState extends State<DetailScreen> {
         !widget.store.allowsSource(detail.drama.source)) {
       return;
     }
-    if (detail.episodes[index].vip) {
+    if (detail.episodes[index].vip &&
+        detail.drama.source != SourceSite.dsd.id) {
       final accepted = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(

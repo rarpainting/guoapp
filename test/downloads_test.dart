@@ -26,6 +26,7 @@ class DownloadRepository extends FixtureRepository {
   int onlineCalls = 0;
   int alternateCalls = 0;
   bool missing = false;
+  DramaDetail? detailOverride;
 
   Episode episode(int number) => Episode({
     'id': '$number',
@@ -51,6 +52,7 @@ class DownloadRepository extends FixtureRepository {
   @override
   Future<DramaDetail> detail(Drama drama) async {
     detailCalls++;
+    if (detailOverride != null) return detailOverride!;
     return DramaDetail(drama, [episode(1), episode(2), episode(3)]);
   }
 
@@ -211,6 +213,40 @@ void main() {
       },
     );
   }
+
+  testWidgets('DSD VIP episodes open playback without a confirmation dialog', (
+    tester,
+  ) async {
+    if (!SourceSite.isAvailable(SourceSite.dsd.id)) return;
+    size(tester, const Size(390, 844));
+    final repository = DownloadRepository();
+    final store = await makeStore();
+    final drama = const Drama(
+      id: 'dsd:100',
+      source: 'dsd',
+      title: '帝果合成剧',
+      episodes: 1,
+    );
+    repository.detailOverride = DramaDetail(drama, [
+      Episode({'id': '1', 'currentEpisode': 1, 'vip': true}, 1),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(),
+        home: DetailScreen(
+          drama: drama,
+          repository: repository,
+          store: store,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('episode-1')));
+    await tester.pump();
+    expect(find.text('这是一集 VIP 内容'), findsNothing);
+    expect(find.text('正在准备播放'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('queue controls, filtering and deletion work on a narrow phone', (
     tester,

@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'models.dart';
 import 'episode_browser.dart';
 import 'playback_preferences.dart';
+import 'video_enhancement.dart';
+import 'video_enhancement_settings.dart';
 
 enum PlayerMenuSection { episodes, speed, quality, settings }
 
@@ -27,6 +29,8 @@ class PlayerMenu extends StatefulWidget {
     this.danmakuStatus = '',
     this.onRetryDanmaku,
     this.preloadStatus = '',
+    this.enhancement,
+    this.onCompareEnhancement,
   });
 
   final PlayerMenuSection section;
@@ -42,6 +46,8 @@ class PlayerMenu extends StatefulWidget {
   final String danmakuStatus;
   final VoidCallback? onRetryDanmaku;
   final String preloadStatus;
+  final VideoEnhancementController? enhancement;
+  final VoidCallback? onCompareEnhancement;
   final ValueChanged<int> onEpisode;
   final Future<void> Function(PlaybackPreferences) onPreferences;
   final Future<void> Function() onFavorite;
@@ -73,6 +79,7 @@ class _PlayerMenuState extends State<PlayerMenu> {
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final landscape = size.width > size.height;
+    final colors = Theme.of(context).colorScheme;
     final title = switch (widget.section) {
       PlayerMenuSection.episodes => '选集 · 共 ${widget.episodes.length} 集',
       PlayerMenuSection.speed => '播放倍速',
@@ -83,7 +90,7 @@ class _PlayerMenuState extends State<PlayerMenu> {
       key: const ValueKey('player-menu'),
       alignment: landscape ? Alignment.centerRight : Alignment.bottomCenter,
       insetPadding: const EdgeInsets.all(12),
-      backgroundColor: const Color(0xFF191A20),
+      backgroundColor: colors.surface,
       child: SizedBox(
         width: landscape ? math.min(440, size.width * .6) : 600,
         height: landscape ? size.height : size.height * .72,
@@ -141,6 +148,12 @@ class _PlayerMenuState extends State<PlayerMenu> {
   Widget _settings() {
     final preferences = widget.preferences;
     final all = widget.section == PlayerMenuSection.settings;
+    final colors = Theme.of(context).colorScheme;
+    final helperStyle = TextStyle(
+      fontSize: 13,
+      color: colors.onSurfaceVariant,
+      height: 1.5,
+    );
     final qualities = {
       0,
       ...widget.qualities.where((quality) => quality > 0),
@@ -181,7 +194,7 @@ class _PlayerMenuState extends State<PlayerMenu> {
                 : widget.actualQuality > 0
                 ? '当前播放 ${widget.actualQuality}P'
                 : '使用源站可用画质',
-            style: const TextStyle(fontSize: 13, color: Colors.white70),
+            style: helperStyle,
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -208,11 +221,23 @@ class _PlayerMenuState extends State<PlayerMenu> {
               padding: const EdgeInsets.only(top: 8),
               child: Text(
                 '已保存 ${preferences.quality}P 偏好，本集暂无此画质。',
-                style: const TextStyle(fontSize: 13, color: Colors.white70),
+                style: helperStyle,
               ),
             ),
           const SizedBox(height: 20),
         ],
+        if ((all || widget.section == PlayerMenuSection.quality) &&
+            widget.enhancement != null)
+          VideoEnhancementSettings(
+            controller: widget.enhancement!,
+            busy: _busy,
+            onChanged: (enhancement) => _run(
+              () => widget.onPreferences(
+                preferences.copyWith(enhancement: enhancement),
+              ),
+            ),
+            onCompare: widget.onCompareEnhancement ?? () {},
+          ),
         if (all && widget.showDanmaku) ...[
           SwitchListTile.adaptive(
             key: const ValueKey('player-danmaku-enabled'),
@@ -283,11 +308,7 @@ class _PlayerMenuState extends State<PlayerMenu> {
             widget.mobile
                 ? '上下滑切集；长按画面临时 3 倍速，松开恢复。竖屏轻点暂停，横屏轻点显示控制；双击播放或暂停。'
                 : '空格：播放 / 暂停\n左右键：后退 / 快进 5 秒\n长按右键或画面：临时 3 倍速\n上下键：音量 ±5%，M：静音\nF、F11、Ctrl+F：全屏\nEsc：先关闭菜单，再退出全屏',
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.white70,
-              height: 1.6,
-            ),
+            style: helperStyle.copyWith(height: 1.6),
           ),
         ],
       ],

@@ -35,6 +35,10 @@ func (d *Downloader) providerBaseURL(source string) string {
 		configured, fallback = d.cfg.HongguoURL, hongguoBaseURL
 	case sourceHuangju:
 		configured, fallback = d.cfg.HuangjuURL, huangjuBaseURL
+	case sourceYeguo:
+		configured, fallback = d.cfg.YeguoURL, yeguoBaseURL
+	case sourceDSD:
+		configured, fallback = d.cfg.DSDURL, dsdBaseURL
 	default:
 		fallback = "https://d2pypzndaqisk.cloudfront.net"
 	}
@@ -58,6 +62,10 @@ func providerSourceForURL(raw string) string {
 		return sourceHongguo
 	case host == "huangju.net" || host == "www.huangju.net" || host == "api.huangju.net":
 		return sourceHuangju
+	case host == "delta.ygrwdsgt.cc" || host == "yeguodj.com" || host == "www.yeguodj.com":
+		return sourceYeguo
+	case host == "dsd.com.se" || host == "www.dsd.com.se":
+		return sourceDSD
 	default:
 		return ""
 	}
@@ -65,7 +73,7 @@ func providerSourceForURL(raw string) string {
 
 func (d *Downloader) providerURLCandidates(raw string) []string {
 	source := providerSourceForURL(raw)
-	if source == "" || source == sourceHuangju {
+	if source == "" || source == sourceHuangju || source == sourceYeguo {
 		return []string{raw}
 	}
 	parsed, _ := url.Parse(raw)
@@ -92,14 +100,6 @@ func (d *Downloader) providerURLCandidates(raw string) []string {
 	return candidates
 }
 
-func (d *Downloader) preferredProviderURL(raw string) string {
-	candidates := d.providerURLCandidates(raw)
-	if len(candidates) == 0 {
-		return raw
-	}
-	return candidates[0]
-}
-
 func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (providerMedia, error) {
 	chapter := task.Chapter
 	chapter.Source = canonicalProviderSource(chapter.Source)
@@ -111,6 +111,12 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 	}
 	if chapter.Source == sourceHuangju {
 		return d.resolveHuangjuMedia(ctx, task)
+	}
+	if chapter.Source == sourceYeguo {
+		return d.resolveYeguoMedia(ctx, task)
+	}
+	if chapter.Source == sourceDSD {
+		return d.resolveDSDMedia(ctx, task)
 	}
 	if strings.HasPrefix(chapter.VideoURL, "hongguo-cenc://") {
 		return d.resolveHongguoMedia(ctx, task)
@@ -186,6 +192,5 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 		media.Playlist = playlist
 		media.URL = finalURL
 	}
-	media.URL = d.preferredProviderURL(media.URL)
 	return media, nil
 }

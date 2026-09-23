@@ -25,6 +25,8 @@ const (
 	sourceHuangdou      = "huangdou"
 	sourceHongguo       = "hongguo"
 	sourceHuangju       = "huangju"
+	sourceYeguo         = "yeguo"
+	sourceDSD           = "dsd"
 	sourceCloudFront    = "cloudfront"
 
 	providerMaxBodyBytes = 20 * 1024 * 1024
@@ -86,7 +88,7 @@ func splitProviderDramaID(id string) (source, sourceID string, ok bool) {
 
 func isHuangguoProviderSource(source string) bool {
 	switch canonicalProviderSource(source) {
-	case sourceHuangguoAI, sourceHuangguoVideo, sourceHuangdou, sourceHongguo, sourceHuangju, sourceCloudFront:
+	case sourceHuangguoAI, sourceHuangguoVideo, sourceHuangdou, sourceHongguo, sourceHuangju, sourceYeguo, sourceDSD, sourceCloudFront:
 		return true
 	default:
 		return false
@@ -105,6 +107,10 @@ func canonicalProviderSource(source string) string {
 		return sourceHongguo
 	case "huangju", "huangju.net", "api.huangju.net":
 		return sourceHuangju
+	case "yeguo", "delta.ygrwdsgt.cc", "yeguodj.com", "www.yeguodj.com":
+		return sourceYeguo
+	case "dsd", "dsd.com.se", "www.dsd.com.se":
+		return sourceDSD
 	case "cloudfront":
 		return sourceCloudFront
 	default:
@@ -209,6 +215,12 @@ func (d *Downloader) GetHuangguoChapters(ctx context.Context, source, sourceID s
 		return d.fetchHongguoChapters(ctx, sourceID)
 	case sourceHuangju:
 		drama, chapters, err := d.fetchHuangjuDetail(ctx, sourceID)
+		return drama.DisplayTitle(), chapters, err
+	case sourceYeguo:
+		drama, chapters, err := d.fetchYeguoDetail(ctx, sourceID)
+		return drama.DisplayTitle(), chapters, err
+	case sourceDSD:
+		drama, chapters, err := d.fetchDSDDetail(ctx, sourceID)
 		return drama.DisplayTitle(), chapters, err
 	case sourceCloudFront:
 		return d.fetchLegacyChapters(ctx, sourceID)
@@ -357,12 +369,18 @@ func (d *Downloader) fetchProviderText(ctx context.Context, rawURL, referer stri
 				return "", err
 			}
 			req.Header.Set("User-Agent", userAgent)
+			if agent, ok := ctx.Value(providerTextUserAgentKey{}).(string); ok && agent != "" {
+				req.Header.Set("User-Agent", agent)
+			}
 			if providerSourceForURL(rawURL) != "" {
 				req.Header.Set("Referer", providerRefererForURL(candidate, referer))
 			} else {
 				req.Header.Set("Referer", referer)
 			}
 			req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+			if noCache, _ := ctx.Value(providerTextNoCacheKey{}).(bool); noCache {
+				req.Header.Set("Cache-Control", "no-cache")
+			}
 			resp, err := d.doCatalogRequestWithTimeout(req, timeout)
 			if err != nil {
 				lastErr = err

@@ -18,6 +18,7 @@ import 'media_library.dart';
 import 'package_smoke.dart';
 import 'lan_controller.dart';
 import 'player_screen.dart';
+import 'video_enhancement_assets.dart';
 
 Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,6 +30,7 @@ Future<void> main(List<String> arguments) async {
     await windowManager.ensureInitialized();
   }
   MediaKit.ensureInitialized();
+  VideoEnhancementAssets.registerLicenses();
   if (Platform.isWindows && arguments.firstOrNull == '--package-smoke') {
     await runPackageSmoke(arguments);
     return;

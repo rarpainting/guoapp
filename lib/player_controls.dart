@@ -7,6 +7,7 @@ import 'player_interactions.dart';
 import 'playback_buffer.dart';
 import 'widgets.dart';
 import 'lan_screen.dart';
+import 'video_enhancement.dart';
 
 class PlayerControls extends StatefulWidget {
   const PlayerControls({
@@ -31,6 +32,8 @@ class PlayerControls extends StatefulWidget {
     this.panelOpen = false,
     this.onSeek,
     this.onPush,
+    this.onPictureInPicture,
+    this.enhancement,
   });
 
   final Player player;
@@ -53,6 +56,8 @@ class PlayerControls extends StatefulWidget {
   final bool panelOpen;
   final Future<void> Function(Duration)? onSeek;
   final Future<void> Function()? onPush;
+  final Future<void> Function()? onPictureInPicture;
+  final VideoEnhancementController? enhancement;
 
   @override
   State<PlayerControls> createState() => _PlayerControlsState();
@@ -222,9 +227,9 @@ class _PlayerControlsState extends State<PlayerControls> {
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                Color(0x99000000),
+                                Color(0xAA000000),
                                 Colors.transparent,
-                                Color(0xDD000000),
+                                Color(0xE6000000),
                               ],
                               stops: [0, .45, 1],
                             ),
@@ -237,225 +242,19 @@ class _PlayerControlsState extends State<PlayerControls> {
                         minimum: const EdgeInsets.symmetric(horizontal: 8),
                         child: Stack(
                           children: [
-                            Align(
-                              alignment: Alignment.topCenter,
-                              child: Row(
-                                children: [
-                                  if (widget.fullscreen)
-                                    IconButton(
-                                      tooltip: '退出全屏',
-                                      onPressed: widget.onFullscreen,
-                                      icon: const Icon(
-                                        Icons.arrow_back_rounded,
-                                      ),
-                                    ),
-                                  Expanded(
-                                    child: Text(
-                                      widget.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  if (widget.fullscreen &&
-                                      widget.onPush != null)
-                                    LanPushButton(
-                                      key: const ValueKey(
-                                        'fullscreen-lan-push',
-                                      ),
-                                      onPressed: widget.enabled
-                                          ? () => _panel(widget.onPush!)
-                                          : null,
-                                    ),
-                                  IconButton(
-                                    key: const ValueKey('player-settings'),
-                                    tooltip: '播放设置',
-                                    onPressed: () => _panel(widget.onSettings),
-                                    icon: const Icon(Icons.tune_rounded),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            if (!state.buffering &&
+                            if (widget.fullscreen) _topBar(),
+                            if (!widget.fullscreen &&
+                                !state.buffering &&
                                 widget.enabled &&
-                                constraints.maxHeight >=
-                                    (widget.fullscreen ? 420 : 300))
-                              Center(
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      tooltip: '上一集',
-                                      onPressed: widget.onPrevious,
-                                      icon: const Icon(
-                                        Icons.skip_previous_rounded,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    IconButton.filledTonal(
-                                      tooltip: state.playing ? '暂停' : '播放',
-                                      iconSize: 38,
-                                      onPressed: () {
-                                        widget.onTogglePlayback();
-                                        _show();
-                                      },
-                                      icon: Icon(
-                                        state.playing
-                                            ? Icons.pause_rounded
-                                            : Icons.play_arrow_rounded,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    IconButton(
-                                      tooltip: '下一集',
-                                      onPressed: widget.onNext,
-                                      icon: const Icon(Icons.skip_next_rounded),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            Align(
-                              alignment: Alignment.bottomCenter,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  SliderTheme(
-                                    data: SliderTheme.of(
-                                      context,
-                                    ).copyWith(trackHeight: 3),
-                                    child: Slider(
-                                      key: const ValueKey('player-progress'),
-                                      value: (_seekValue ?? position).clamp(
-                                        0,
-                                        duration > 0 ? duration : 1,
-                                      ),
-                                      max: duration > 0 ? duration : 1,
-                                      secondaryTrackValue: buffered.clamp(
-                                        0,
-                                        duration > 0 ? duration : 1,
-                                      ),
-                                      semanticFormatterCallback: formatPosition,
-                                      onChangeStart:
-                                          widget.enabled && duration > 0
-                                          ? (_) {
-                                              widget.interactions.cancel();
-                                              _hideTimer?.cancel();
-                                            }
-                                          : null,
-                                      onChanged:
-                                          !widget.enabled || duration <= 0
-                                          ? null
-                                          : (value) {
-                                              _hideTimer?.cancel();
-                                              setState(
-                                                () => _seekValue = value,
-                                              );
-                                            },
-                                      onChangeEnd: (value) {
-                                        if (widget.enabled && duration > 0) {
-                                          (widget.onSeek ?? widget.player.seek)(
-                                            Duration(
-                                              milliseconds: (value * 1000)
-                                                  .round(),
-                                            ),
-                                          );
-                                        }
-                                        setState(() => _seekValue = null);
-                                        _show();
-                                      },
-                                    ),
-                                  ),
-                                  if (constraints.maxHeight >= 240)
-                                    PlaybackBufferStatus(
-                                      player: widget.player,
-                                      enabled: widget.enabled,
-                                    ),
-                                  Row(
-                                    children: [
-                                      if (constraints.maxHeight <
-                                          (widget.fullscreen ? 420 : 300))
-                                        IconButton(
-                                          tooltip: state.playing ? '暂停' : '播放',
-                                          onPressed: widget.enabled
-                                              ? widget.onTogglePlayback
-                                              : null,
-                                          icon: Icon(
-                                            state.playing
-                                                ? Icons.pause_rounded
-                                                : Icons.play_arrow_rounded,
-                                          ),
-                                        ),
-                                      Expanded(
-                                        child: Text(
-                                          '${formatPosition(_seekValue ?? position)} / ${formatPosition(duration)}',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(fontSize: 12),
-                                        ),
-                                      ),
-                                      if (!widget.swipeEnabled)
-                                        IconButton(
-                                          tooltip: state.volume == 0
-                                              ? '取消静音'
-                                              : '静音',
-                                          onPressed: widget.enabled
-                                              ? widget.interactions.toggleMute
-                                              : null,
-                                          icon: Icon(
-                                            state.volume == 0
-                                                ? Icons.volume_off_rounded
-                                                : Icons.volume_up_rounded,
-                                          ),
-                                        ),
-                                      IconButton(
-                                        tooltip: widget.fullscreen
-                                            ? '退出全屏'
-                                            : '旋转与全屏',
-                                        onPressed: widget.onFullscreen,
-                                        icon: Icon(
-                                          widget.fullscreen
-                                              ? Icons.fullscreen_exit_rounded
-                                              : Icons.fullscreen_rounded,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  if (widget.fullscreen &&
-                                      constraints.maxHeight >= 240)
-                                    SingleChildScrollView(
-                                      scrollDirection: Axis.horizontal,
-                                      child: Row(
-                                        children: [
-                                          TextButton(
-                                            key: const ValueKey('player-speed'),
-                                            onPressed: () =>
-                                                _panel(widget.onSpeed),
-                                            child: Text('${widget.speed}x'),
-                                          ),
-                                          TextButton(
-                                            key: const ValueKey(
-                                              'player-quality',
-                                            ),
-                                            onPressed: () =>
-                                                _panel(widget.onQuality),
-                                            child: Text(widget.qualityLabel),
-                                          ),
-                                          TextButton.icon(
-                                            key: const ValueKey(
-                                              'player-episodes',
-                                            ),
-                                            onPressed: () =>
-                                                _panel(widget.onEpisodes),
-                                            icon: const Icon(
-                                              Icons.grid_view_rounded,
-                                              size: 18,
-                                            ),
-                                            label: const Text('选集'),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                ],
-                              ),
+                                constraints.maxHeight >= 300)
+                              _centerPlayback(state.playing),
+                            _bottomControls(
+                              constraints: constraints,
+                              playing: state.playing,
+                              volume: state.volume,
+                              duration: duration,
+                              position: position,
+                              buffered: buffered,
                             ),
                           ],
                         ),
@@ -465,33 +264,280 @@ class _PlayerControlsState extends State<PlayerControls> {
                 ),
               ),
             ),
-            AnimatedBuilder(
-              animation: widget.interactions,
-              builder: (context, _) {
-                final feedback = widget.interactions.feedback;
-                if (feedback.isEmpty) return const SizedBox.shrink();
-                return IgnorePointer(
-                  child: Align(
-                    alignment: const Alignment(0, -.5),
-                    child: Container(
-                      margin: const EdgeInsets.all(16),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black87,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(feedback, textAlign: TextAlign.center),
-                    ),
-                  ),
-                );
-              },
-            ),
+            _gestureFeedback(),
           ],
         ),
       ),
     );
   }
+
+  Widget _topBar() => Align(
+    alignment: Alignment.topCenter,
+    child: Row(
+      children: [
+        IconButton(
+          tooltip: '退出全屏',
+          onPressed: widget.onFullscreen,
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
+        Expanded(
+          child: Text(
+            widget.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _centerPlayback(bool playing) => Center(
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          tooltip: '上一集',
+          onPressed: widget.onPrevious,
+          icon: const Icon(Icons.skip_previous_rounded),
+        ),
+        const SizedBox(width: 12),
+        IconButton.filledTonal(
+          tooltip: playing ? '暂停' : '播放',
+          iconSize: 38,
+          onPressed: () {
+            widget.onTogglePlayback();
+            _show();
+          },
+          icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded),
+        ),
+        const SizedBox(width: 12),
+        IconButton(
+          tooltip: '下一集',
+          onPressed: widget.onNext,
+          icon: const Icon(Icons.skip_next_rounded),
+        ),
+      ],
+    ),
+  );
+
+  Widget _bottomControls({
+    required BoxConstraints constraints,
+    required bool playing,
+    required double volume,
+    required double duration,
+    required double position,
+    required double buffered,
+  }) {
+    final width = constraints.maxWidth;
+    final fullscreen = widget.fullscreen;
+    final showSkip = width >= 380;
+    final showEpisodes = fullscreen || width >= 420;
+    final showSpeedQuality = fullscreen && width >= 720;
+    final showPush = widget.onPush != null && fullscreen && width >= 860;
+    final showCompare = fullscreen && width >= 820;
+    final showVolume = !widget.swipeEnabled && width >= 520;
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(trackHeight: 3),
+            child: Slider(
+              key: const ValueKey('player-progress'),
+              value: (_seekValue ?? position).clamp(
+                0,
+                duration > 0 ? duration : 1,
+              ),
+              max: duration > 0 ? duration : 1,
+              secondaryTrackValue: buffered.clamp(
+                0,
+                duration > 0 ? duration : 1,
+              ),
+              semanticFormatterCallback: formatPosition,
+              onChangeStart: widget.enabled && duration > 0
+                  ? (_) {
+                      widget.interactions.cancel();
+                      _hideTimer?.cancel();
+                    }
+                  : null,
+              onChanged: !widget.enabled || duration <= 0
+                  ? null
+                  : (value) {
+                      _hideTimer?.cancel();
+                      setState(() => _seekValue = value);
+                    },
+              onChangeEnd: (value) {
+                if (widget.enabled && duration > 0) {
+                  (widget.onSeek ?? widget.player.seek)(
+                    Duration(milliseconds: (value * 1000).round()),
+                  );
+                }
+                setState(() => _seekValue = null);
+                _show();
+              },
+            ),
+          ),
+          if (constraints.maxHeight >= 240)
+            PlaybackBufferStatus(
+              player: widget.player,
+              enabled: widget.enabled,
+            ),
+          Row(
+            children: [
+              IconButton(
+                tooltip: playing ? '暂停' : '播放',
+                onPressed: widget.enabled
+                    ? () {
+                        widget.onTogglePlayback();
+                        _show();
+                      }
+                    : null,
+                icon: Icon(
+                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                ),
+              ),
+              if (showSkip) ...[
+                IconButton(
+                  tooltip: '上一集',
+                  onPressed: widget.onPrevious,
+                  icon: const Icon(Icons.skip_previous_rounded),
+                ),
+                IconButton(
+                  tooltip: '下一集',
+                  onPressed: widget.onNext,
+                  icon: const Icon(Icons.skip_next_rounded),
+                ),
+              ],
+              Expanded(
+                child: Text(
+                  '${formatPosition(_seekValue ?? position)} / ${formatPosition(duration)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+              if (showVolume)
+                IconButton(
+                  tooltip: volume == 0 ? '取消静音' : '静音',
+                  onPressed: widget.enabled
+                      ? widget.interactions.toggleMute
+                      : null,
+                  icon: Icon(
+                    volume == 0
+                        ? Icons.volume_off_rounded
+                        : Icons.volume_up_rounded,
+                  ),
+                ),
+              if (showEpisodes)
+                IconButton(
+                  key: const ValueKey('player-episodes'),
+                  tooltip: '选集',
+                  onPressed: widget.enabled
+                      ? () => _panel(widget.onEpisodes)
+                      : null,
+                  icon: const Icon(Icons.grid_view_rounded),
+                ),
+              if (showSpeedQuality) ...[
+                TextButton(
+                  key: const ValueKey('player-speed'),
+                  onPressed: widget.enabled
+                      ? () => _panel(widget.onSpeed)
+                      : null,
+                  child: Text('${widget.speed}x'),
+                ),
+                TextButton(
+                  key: const ValueKey('player-quality'),
+                  onPressed: widget.enabled
+                      ? () => _panel(widget.onQuality)
+                      : null,
+                  child: Text(widget.qualityLabel),
+                ),
+              ],
+              if (showPush)
+                LanPushButton(
+                  key: const ValueKey('fullscreen-lan-push'),
+                  onPressed: widget.enabled
+                      ? () => _panel(widget.onPush!)
+                      : null,
+                ),
+              if (showCompare) _enhancementCompareButton(),
+              if (widget.onPictureInPicture != null)
+                IconButton(
+                  key: const ValueKey('player-picture-in-picture'),
+                  tooltip: '画中画',
+                  onPressed: widget.enabled
+                      ? () => _panel(widget.onPictureInPicture!)
+                      : null,
+                  icon: const Icon(Icons.picture_in_picture_alt_rounded),
+                ),
+              IconButton(
+                key: const ValueKey('player-settings'),
+                tooltip: '播放设置',
+                onPressed: widget.enabled
+                    ? () => _panel(widget.onSettings)
+                    : null,
+                icon: const Icon(Icons.tune_rounded),
+              ),
+              IconButton(
+                tooltip: fullscreen ? '退出全屏' : '旋转与全屏',
+                onPressed: widget.onFullscreen,
+                icon: Icon(
+                  fullscreen
+                      ? Icons.fullscreen_exit_rounded
+                      : Icons.fullscreen_rounded,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _enhancementCompareButton() {
+    final enhancement = widget.enhancement;
+    if (enhancement == null) return const SizedBox.shrink();
+    return AnimatedBuilder(
+      animation: enhancement,
+      builder: (_, _) {
+        if (!enhancement.canCompare) return const SizedBox.shrink();
+        return IconButton(
+          key: const ValueKey('player-enhancement-compare'),
+          tooltip: enhancement.comparing ? '原画对比中，点击恢复增强' : '原画对比',
+          isSelected: enhancement.comparing,
+          onPressed: widget.enabled
+              ? () {
+                  widget.interactions.cancel();
+                  unawaited(enhancement.toggleCompare());
+                  _show();
+                }
+              : null,
+          icon: const Icon(Icons.compare_rounded),
+        );
+      },
+    );
+  }
+
+  Widget _gestureFeedback() => AnimatedBuilder(
+    animation: widget.interactions,
+    builder: (context, _) {
+      final feedback = widget.interactions.feedback;
+      if (feedback.isEmpty) return const SizedBox.shrink();
+      return IgnorePointer(
+        child: Align(
+          alignment: const Alignment(0, -.5),
+          child: Container(
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.black87,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(feedback, textAlign: TextAlign.center),
+          ),
+        ),
+      );
+    },
+  );
 }

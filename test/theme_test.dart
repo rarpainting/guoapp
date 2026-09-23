@@ -7,6 +7,7 @@ import 'package:duanju_app/local_store.dart';
 import 'package:duanju_app/main.dart';
 import 'package:duanju_app/player_screen.dart';
 import 'package:duanju_app/settings_screen.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -225,20 +226,20 @@ void main() {
   }
 
   testWidgets(
-    'player keeps a dark theme and restores light system bars on return',
+    'player shell follows light theme while video controls stay dark',
     (tester) async {
       phone(tester);
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final store = await localStore();
       await store.setThemeMode('light');
       final repository = RouteRepository();
       final platform = ScriptedPlayer();
-      await tester.pumpWidget(DuanjuApp(repository: repository, store: store));
-      await tester.pumpAndSettle();
       final detail = await repository.detail(FixtureRepository.free);
-      final navigator = Navigator.of(tester.element(find.byType(HomeScreen)));
-      navigator.push(
-        MaterialPageRoute<void>(
-          builder: (_) => PlayerScreen(
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: PlayerScreen(
             detail: detail,
             initialIndex: 0,
             repository: repository,
@@ -259,13 +260,7 @@ void main() {
         Brightness.dark,
       );
       expect(
-        SystemChrome.latestStyle?.systemNavigationBarIconBrightness,
-        Brightness.light,
-      );
-      navigator.pop();
-      await tester.pumpAndSettle();
-      expect(
-        Theme.of(tester.element(find.byType(HomeScreen))).brightness,
+        Theme.of(tester.element(find.byType(PlayerScreen))).brightness,
         Brightness.light,
       );
       expect(
@@ -276,9 +271,15 @@ void main() {
         SystemChrome.latestStyle?.systemNavigationBarContrastEnforced,
         isFalse,
       );
+      expect(find.text('选集'), findsOneWidget);
+      expect(find.byKey(const ValueKey('play-episode-1')), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      for (var i = 0; i < 12; i++) {
+        await tester.pump(const Duration(milliseconds: 10));
+      }
+      debugDefaultTargetPlatformOverride = null;
       expect(platform.disposed, isTrue);
       expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
       store.dispose();
     },
   );

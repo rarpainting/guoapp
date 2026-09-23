@@ -651,9 +651,7 @@ class LocalStore extends ChangeNotifier {
     if (cleanName.isEmpty || cleanName.length > 40) {
       throw StateError('用户名需要 1 至 40 个字符');
     }
-    if (sources.any(
-      (source) => !SourceSite.knownValues.any((site) => site.id == source),
-    )) {
+    if (sources.any((source) => !SourceSite.isKnown(source))) {
       throw StateError('站源无效');
     }
     if (targetId != 'default' &&

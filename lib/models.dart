@@ -7,8 +7,8 @@ class SourceSite {
   final String id;
   final String name;
   final String description;
-  bool get onlineSearch => id == 'hongguo' || id == 'huangju';
-  bool get pagedSearch => id == 'huangju';
+  bool get onlineSearch => id == 'hongguo' || pagedSearch;
+  bool get pagedSearch => id == 'huangju' || id == 'yeguo' || id == 'dsd';
   bool get searchSuggestions => id == 'hongguo';
   String get groupId => switch (id) {
     'huangguo-video' || 'huangguoai' || 'cloudfront' => 'huangguo',
@@ -23,18 +23,32 @@ class SourceSite {
   };
 
   static const hongguo = SourceSite('hongguo', '红果', '短剧 · 漫剧 · AI 剧');
+  static const dsd = SourceSite('dsd', '帝果', '分类视频 · 在线搜索');
   static const knownValues = [
     hongguo,
     SourceSite('huangdou', '黄豆', '精选短剧'),
-    SourceSite('huangju', '黄剧', '热门 · 最新 · 分类短剧'),
+    SourceSite('huangju', '剧果', '热门 · 最新 · 分类短剧'),
+    SourceSite('yeguo', '野果', '分类短剧 · 在线搜索'),
+    dsd,
+    SourceSite('huangguo-video', '黄果视频', '视频剧集'),
+    SourceSite('huangguoai', '黄果 AI', 'AI 短剧'),
+    SourceSite('cloudfront', '黄果旧版', '旧 API 剧库'),
+  ];
+  static const allValues = [
+    hongguo,
+    SourceSite('huangdou', '黄豆', '精选短剧'),
+    SourceSite('huangju', '剧果', '热门 · 最新 · 分类短剧'),
+    SourceSite('yeguo', '野果', '分类短剧 · 在线搜索'),
+    dsd,
     SourceSite('huangguo-video', '黄果视频', '视频剧集'),
     SourceSite('huangguoai', '黄果 AI', 'AI 短剧'),
     SourceSite('cloudfront', '黄果旧版', '旧 API 剧库'),
   ];
   static const values = allSourcesEnabled ? knownValues : [hongguo];
   static bool isAvailable(String id) => values.any((site) => site.id == id);
+  static bool isKnown(String id) => allValues.any((site) => site.id == id);
   static SourceSite byId(String id) =>
-      knownValues.firstWhere((site) => site.id == id, orElse: () => hongguo);
+      allValues.firstWhere((site) => site.id == id, orElse: () => hongguo);
 }
 
 class SourceGroup {

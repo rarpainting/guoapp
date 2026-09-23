@@ -254,7 +254,18 @@ class _RankingsScreenState extends State<RankingsScreen> {
               ),
             Expanded(
               child: _loading && items.isEmpty
-                  ? const Center(child: CircularProgressIndicator())
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const CircularProgressIndicator(),
+                          if (_board?.source == 'hongguo') ...[
+                            const SizedBox(height: 16),
+                            const Text('正在获取榜单，数据未完整返回时会自动重试'),
+                          ],
+                        ],
+                      ),
+                    )
                   : items.isEmpty
                   ? StatusPanel(
                       title: _error == null ? '暂无榜单内容' : '榜单暂时无法加载',

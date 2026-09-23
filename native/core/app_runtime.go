@@ -28,6 +28,9 @@ type Config struct {
 	HongguoURL       string
 	HuangjuURL       string
 	HuangjuAPIURL    string
+	YeguoURL         string
+	YeguoAPIURL      string
+	DSDURL           string
 	Token            string
 	AESKeyHex        string
 	InterfaceKey     string
@@ -51,6 +54,9 @@ type Downloader struct {
 	hongguo               *hongguoAppClient
 	huangjuOnce           sync.Once
 	huangju               *huangjuAPIClient
+	yeguoOnce             sync.Once
+	yeguo                 *yeguoAPIClient
+	dsdCatalog            dsdCatalogState
 	diagnostics           *diagnosticLog
 	apiMu                 sync.Mutex
 	apiBase               string
@@ -341,7 +347,7 @@ func nativeDispatch(input nativeInput) (any, error) {
 			nativeState.engine = engine
 		}
 		nativeState.Unlock()
-		return map[string]any{"version": "0.2.16", "standalone": true, "allSources": buildAllSources == "true"}, nil
+		return map[string]any{"version": "0.2.17", "standalone": true, "allSources": buildAllSources == "true"}, nil
 	}
 	engine := nativeState.engine
 	nativeState.Unlock()
@@ -526,6 +532,24 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 		result.HasMore = more
 		return result, nil
 	}
+	if query != "" && (source == sourceYeguo || source == sourceDSD) {
+		var items []Drama
+		var more bool
+		var err error
+		if source == sourceYeguo {
+			items, more, err = d.fetchYeguoCatalogPage(ctx, page, "", query)
+		} else {
+			items, more, err = d.fetchDSDCatalogPage(ctx, page, "", query)
+		}
+		if err != nil {
+			return result, err
+		}
+		for _, drama := range items {
+			result.Items = append(result.Items, nativeNormalize(drama))
+		}
+		result.HasMore = more
+		return result, nil
+	}
 	if query != "" {
 		engine.mu.Lock()
 		items := append([]nativeDrama{}, engine.catalogs[source]...)
@@ -594,6 +618,10 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 		items, result.HasMore, err = d.fetchHuangguoAICatalogPage(ctx, page, category)
 	case sourceHuangju:
 		items, result.HasMore, err = d.fetchHuangjuCatalogPage(ctx, page, category, "")
+	case sourceYeguo:
+		items, result.HasMore, err = d.fetchYeguoCatalogPage(ctx, page, category, "")
+	case sourceDSD:
+		items, result.HasMore, err = d.fetchDSDCatalogPage(ctx, page, category, "")
 	case sourceHuangguoVideo:
 		address := fmt.Sprintf("%s/videos?page=%d", d.providerBaseURL(source), page)
 		if category != "" {
@@ -611,7 +639,7 @@ func (engine *nativeEngine) nativeCatalog(ctx context.Context, input nativeInput
 	if err != nil && len(items) == 0 {
 		return result, err
 	}
-	if len(items) == 0 && page == 1 && source != sourceHuangju {
+	if len(items) == 0 && page == 1 && source != sourceHuangju && source != sourceYeguo && source != sourceDSD {
 		return result, errors.New("站源暂未返回剧集，请稍后刷新")
 	}
 	if err != nil {
@@ -647,6 +675,10 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama nativeDrama)
 		raw, chapters, err = engine.downloader.fetchLegacyDetail(ctx, sourceID)
 	case sourceHuangju:
 		raw, chapters, err = engine.downloader.fetchHuangjuDetail(ctx, sourceID)
+	case sourceYeguo:
+		raw, chapters, err = engine.downloader.fetchYeguoDetail(ctx, sourceID)
+	case sourceDSD:
+		raw, chapters, err = engine.downloader.fetchDSDDetail(ctx, sourceID)
 	default:
 		title, chapters, err = engine.downloader.GetHuangguoChapters(ctx, source, sourceID)
 	}
@@ -675,7 +707,7 @@ func (engine *nativeEngine) nativeDetail(ctx context.Context, drama nativeDrama)
 		}
 	}
 	drama.Source, drama.SourceID, drama.Episodes = source, sourceID, len(chapters)
-	if source == sourceHuangju {
+	if source == sourceHuangju || source == sourceYeguo {
 		drama.Episodes = max(drama.Episodes, nativeNormalize(raw).Episodes)
 	}
 	warning := ""
