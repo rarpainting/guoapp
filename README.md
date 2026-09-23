@@ -610,23 +610,23 @@ SR-1、SR-2 与 SR-4 已接入源码，小型动漫 CNN 也包含在本轮；SR-
 
 ## 安装包与平台状态
 
-0.2.18+24 当前只有源码快照，没有本轮修复包。目录中已有 0.2.17+23 APK，其中真果鉴 ARM64 被报告启动崩溃；已在源码修正确定的初始化正则缺陷，尚未重新构建或启动确认。以下 0.2.15 数据为历史构建记录。
-
-0.2.15+21 已完成两版 Android ARM64 打包与安装包检查，签名与 0.2.10+16、0.2.14+20 一致，ARM64 分包版本码递增至 2021，可直接覆盖升级。此版本包含启动导航修复与首页多选、推荐、榜单的布局调整。Windows / iOS 完整应用仍待相应平台构建，本轮没有进行设备运行确认。
+0.2.30+36 已完成红果鉴与真果鉴的 Android ARM64 / ARMv7 Release 打包与包级检查，ARM64 分包版本码为 2036，ARMv7 为 1036。仓库没有 `key.properties`，四包按既有配置沿用 Android Debug 证书；证书指纹与此前本地包一致，可覆盖同证书、同架构的旧包，但不等同正式生产签名。Windows / iOS 完整应用仍待相应平台构建，本轮没有进行设备运行确认。
 
 | 平台 | 包与状态 |
 | --- | --- |
-| Android 8.0+ 手机 | 已生成全站源版 `0.2.30+36` ARM64 APK；ARMv7 / x86_64 构建脚本保留，安装与运行仍待验收 |
+| Android 8.0+ 手机 | `0.2.30+36` 提供红果鉴 / 真果鉴各自的 `arm64-v8a` 与 `armeabi-v7a` APK；x86_64 构建脚本保留，安装与运行仍待验收 |
 | Windows 10/11 x64 | 完整 ZIP 解压后运行 `hongguojian.exe`，全站源版为 `zhenguojian.exe`，保留所有 DLL 和 `data`；局域网原生发现依赖 Windows 10 1903+。完整包运行需 Windows / Actions，新增设备互联未验证 |
 | Android TV | 与手机共用 `0.2.30+36` ARM64 APK；已补强自动识别与电视模式横屏，待电视 / 盒子实机验收；0.2.12 选集 / 设置及 0.2.13 同步 / 推送操作仍待集中验证 |
 | iOS 15.1+ | 已加入工程、Go 核心链接、媒体依赖、文件管理、系统代理桥接、Bonjour / 局域网权限和构建脚本；待 Xcode 构建与真机验收，没有已签名 IPA |
 
-| 历史版本 0.2.15 | 安装包 | 大小 |
+| 当前版本 0.2.30 | 安装包 | 大小 |
 | --- | --- | --- |
-| 红果鉴，仅红果 | `dist/android/hongguojian-0.2.15+21-arm64-v8a.apk` | 30.9 MB |
-| 真果鉴，全部站源 | `dist/android/zhenguojian-0.2.15+21-arm64-v8a.apk` | 30.9 MB |
+| 红果鉴，仅红果，ARM64 | `dist/android/hongguojian-0.2.30+36-arm64-v8a.apk` | 31.1 MB |
+| 红果鉴，仅红果，32 位 ARMv7 | `dist/android/hongguojian-0.2.30+36-armeabi-v7a.apk` | 39.7 MB |
+| 真果鉴，全部站源，ARM64 | `dist/android/zhenguojian-0.2.30+36-arm64-v8a.apk` | 31.1 MB |
+| 真果鉴，全部站源，32 位 ARMv7 | `dist/android/zhenguojian-0.2.30+36-armeabi-v7a.apk` | 39.7 MB |
 
-两份安装包的 SHA256 校验值保存在 `dist/android/SHA256SUMS.txt`。应用名称、包名、版本、签名、包 CRC、ZIP 对齐和对应原生核心均已核对；实际运行行为仍待安装验收。
+四份安装包的 SHA256 校验值保存在 `dist/android/SHA256SUMS.txt`。应用名称、包名、版本、签名、包 CRC、ZIP 对齐和对应原生核心均已核对；实际运行行为仍待安装验收。
 
 从 0.2.6 起，Android APK 默认压缩原生 `.so` 库，对红果版和全站源版同时生效。系统在安装时解压原生库后加载，缩小安装包下载体积；安装后仍需保留解压后的原生库空间。
 
@@ -933,7 +933,7 @@ unzip ../真果·鉴-YYYYMMDDHHMM.zip -d ../restore
 
 ### 当前检查与平台状态
 
-0.2.30+36 优化全屏自动连播的控制栏显示：自动切换到下一集时不把播放开始事件当作用户操作，控制栏保持隐藏；首次进入、手动切集、暂停、缓冲和用户点击 / 键盘 / 遥控操作仍可显示控制栏。手机、Windows 与 Android TV 共用该状态边界。随后生成全站源版 Android ARM64 Release 包 `dist/android/zhenguojian-0.2.30+36-arm64-v8a.apk`，SHA-256 为 `272f344a2d7976811c214180414965ed316a3bcdbd4b7335ec9ce8220c436f15`；已完成 ARM64 原生库、版本信息和 APK v2 签名检查，未安装到设备，播放行为仍待实机验收。
+0.2.30+36 优化全屏自动连播的控制栏显示：自动切换到下一集时不把播放开始事件当作用户操作，控制栏保持隐藏；首次进入、手动切集、暂停、缓冲和用户点击 / 键盘 / 遥控操作仍可显示控制栏。手机、Windows 与 Android TV 共用该状态边界。本轮以 Flutter 3.47.5 和临时映射的国内镜像锁定依赖重新生成红果鉴 / 真果鉴 ARM64 与 ARMv7 Release 包。ARM64 包版本码为 2036，仅含 `arm64-v8a`，各有 17 个 DEFLATE 原生库；ARMv7 包版本码为 1036，仅含 `armeabi-v7a`，各有 25 个 DEFLATE 原生库。四包均为 Android 8.0+、target SDK 36、`debuggable=false`，包 CRC、SHA256、16 KiB ZIP 对齐、v2 签名、应用名称 / 包名和两版 Dart / Go 核心差异均已核对。红果鉴 ARM64 SHA-256 为 `9b8fe1889913a689d8dd92ae8cbb3e28e585bf6306a64c5b21685275ea72d5f7`，ARMv7 为 `9c1e77c0771184a3d2650b256a5fc8c3067de76bbe32d0a8e374d4014669837c`；真果鉴 ARM64 为 `29d393c296a8ce9c5842aec7bbdf9006e899ce76e094bc334360806358db496b`，ARMv7 为 `e754bc31c13c8e2859f36d9cd3642e4601186c2f31f941c78b3185212b60cb74`。签名沿用 Android Debug 证书，不是正式生产签名；未安装到设备，播放行为仍待实机验收。
 
 0.2.29+35 完成电视自动识别与横屏方向管理源码：启动前识别设备，返回前台重新查询，失败保留既有结果；应用统一处理电视模式、手机全屏和播放器退出时的方向归还，Android Activity 对电视模式拦截竖屏请求并在恢复时重申横屏。随后生成全站源版 Android ARM64 Release 包 `dist/android/zhenguojian-0.2.29+35-arm64-v8a.apk`，SHA-256 为 `ef8f971afc6119b8573c1adc2b64d736d27c9b400304bec75926dadd24a35ffc`；包签名为本机 Android Debug 签名，已完成 ARM64 原生库、版本信息和 APK v2 签名检查，未安装到设备，Android 手机、电视 / 盒子及其它平台行为仍未完成本轮验收。
 
