@@ -197,7 +197,9 @@ def synchronize(source, destination, check=False):
 
 def main():
     source = Path(__file__).resolve().parents[1]
-    parser = argparse.ArgumentParser(description='将可发布的纯源码同步到 ../guoapp，并保留目标 .git。')
+    parser = argparse.ArgumentParser(
+        description='将可发布的纯源码同步到 ../guoapp，不执行任何 Git 操作。'
+    )
     parser.add_argument('--destination', type=Path, default=source.parent / 'guoapp', help='覆盖默认同步目标')
     parser.add_argument('--check', action='store_true', help='只检查是否一致，不修改文件')
     options = parser.parse_args()

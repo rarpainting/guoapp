@@ -10,6 +10,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'core_bridge.dart';
 import 'app_layout.dart';
+import 'app_orientation.dart';
 import 'app_theme.dart';
 import 'home_screen.dart';
 import 'local_store.dart';
@@ -35,11 +36,13 @@ Future<void> main(List<String> arguments) async {
     await runPackageSmoke(arguments);
     return;
   }
-  runApp(const AppBootstrap());
+  final device = await AppDevice.detect();
+  runApp(AppBootstrap(device: device));
 }
 
 class AppBootstrap extends StatefulWidget {
-  const AppBootstrap({super.key});
+  const AppBootstrap({super.key, this.device = const AppDevice()});
+  final AppDevice device;
   @override
   State<AppBootstrap> createState() => _AppBootstrapState();
 }
@@ -50,7 +53,7 @@ class _AppBootstrapState extends State<AppBootstrap>
   final navigator = GlobalKey<NavigatorState>();
   LocalStore? store;
   Object? error;
-  AppDevice device = const AppDevice();
+  late AppDevice device = widget.device;
 
   @override
   void dispose() {
@@ -72,6 +75,9 @@ class _AppBootstrapState extends State<AppBootstrap>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && Platform.isAndroid) {
+      unawaited(_refreshDevice());
+    }
     if (!Platform.isIOS) return;
     final library = MediaLibrary.current;
     if (state == AppLifecycleState.paused ||
@@ -90,13 +96,23 @@ class _AppBootstrapState extends State<AppBootstrap>
     }
   }
 
+  Future<void> _refreshDevice() async {
+    final detected = await AppDevice.detect(fallback: device);
+    if (!mounted ||
+        (device.television == detected.television &&
+            device.version == detected.version)) {
+      return;
+    }
+    setState(() => device = detected);
+  }
+
   Future<void> _initialize() async {
     setState(() {
       error = null;
     });
     try {
       final preferences = await SharedPreferences.getInstance();
-      device = await AppDevice.detect();
+      await _refreshDevice();
       await repository.initialize();
       if (mounted) {
         setState(() {
@@ -216,24 +232,27 @@ class DuanjuApp extends StatelessWidget {
         value: AppTheme.systemBars(theme.brightness),
         child: ColoredBox(
           color: theme.scaffoldBackgroundColor,
-          child: AppLayout(
+          child: AppOrientationScope(
             television: tv,
-            version: version,
-            child: Theme(
-              data: tv ? televisionTheme(theme) : theme,
-              child: Shortcuts(
-                shortcuts: const {
-                  SingleActivator(
-                    LogicalKeyboardKey.select,
-                    includeRepeats: false,
-                  ): ActivateIntent(),
-                  SingleActivator(
-                    LogicalKeyboardKey.gameButtonA,
-                    includeRepeats: false,
-                  ): ActivateIntent(),
-                  SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
-                },
-                child: FocusTraversalGroup(child: child!),
+            child: AppLayout(
+              television: tv,
+              version: version,
+              child: Theme(
+                data: tv ? televisionTheme(theme) : theme,
+                child: Shortcuts(
+                  shortcuts: const {
+                    SingleActivator(
+                      LogicalKeyboardKey.select,
+                      includeRepeats: false,
+                    ): ActivateIntent(),
+                    SingleActivator(
+                      LogicalKeyboardKey.gameButtonA,
+                      includeRepeats: false,
+                    ): ActivateIntent(),
+                    SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
+                  },
+                  child: FocusTraversalGroup(child: child!),
+                ),
               ),
             ),
           ),

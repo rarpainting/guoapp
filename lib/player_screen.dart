@@ -9,6 +9,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_layout.dart';
+import 'app_orientation.dart';
 import 'app_theme.dart';
 import 'core_bridge.dart';
 import 'danmaku_controller.dart';
@@ -107,6 +108,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _acceptErrors = false;
   bool _foreground = true;
   bool _playIntent = true;
+  bool _showControlsOnPlaybackReady = true;
   bool _pendingError = false;
   bool _pictureInPictureSupported = false;
   bool _pictureInPictureActive = false;
@@ -122,6 +124,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   double _resumePosition = 0;
   bool _rotating = false;
   bool _television = false;
+  AppOrientationController? _orientationController;
   bool get _pictureInPictureVisible =>
       _pictureInPictureActive || _pictureInPictureRequested;
   bool get _canUsePictureInPicture =>
@@ -234,7 +237,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               _foreground &&
               !_panelOpen &&
               _index + 1 < widget.detail.episodes.length) {
-            _play(_index + 1);
+            _play(_index + 1, showControlsOnReady: false);
           } else {
             _playIntent = false;
             _interactions.cancel();
@@ -664,7 +667,14 @@ class _PlayerScreenState extends State<PlayerScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _television = AppLayout.isTelevision(context);
+    final television = AppLayout.isTelevision(context);
+    if (_television != television) {
+      _fullscreen = false;
+      _automaticFullscreenSuppressed = false;
+      _interactions.cancel();
+    }
+    _television = television;
+    _orientationController = AppOrientationScope.maybeOf(context);
     final orientation = MediaQuery.orientationOf(context);
     if (_lastOrientation != null && _lastOrientation != orientation) {
       _automaticFullscreenSuppressed = false;
@@ -842,6 +852,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     PlaybackRecoveryAction? recoveryAction,
     bool playWhenReady = true,
     PlaybackPlan? handoffPlan,
+    bool showControlsOnReady = true,
   }) async {
     if (_closed ||
         widget.store.profileEpoch != _profileEpoch ||
@@ -881,6 +892,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       _playIntent = playWhenReady;
     }
     _resumePosition = position;
+    _showControlsOnPlaybackReady = showControlsOnReady;
     setState(() {
       _index = index;
       _loading = true;
@@ -1065,21 +1077,18 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (Platform.isWindows) {
         await windowManager.setFullScreen(fullscreen);
       } else if (_mobile) {
-        if (fullscreen) {
-          await SystemChrome.setPreferredOrientations(
-            _aspectRatio >= 1
-                ? [
-                    DeviceOrientation.landscapeLeft,
-                    DeviceOrientation.landscapeRight,
-                  ]
-                : [
-                    DeviceOrientation.portraitUp,
-                    DeviceOrientation.portraitDown,
-                  ],
-          );
-        } else {
-          await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
-        }
+        await (_orientationController?.setPlayback(
+              this,
+              fullscreen: fullscreen,
+              aspectRatio: _aspectRatio,
+            ) ??
+            SystemChrome.setPreferredOrientations(
+              AppOrientationController.orientations(
+                television: _television,
+                fullscreen: fullscreen,
+                aspectRatio: _aspectRatio,
+              ),
+            ));
       }
     } catch (_) {
       if (mounted && !_closed) {
@@ -1345,12 +1354,16 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
     if (Platform.isWindows) {
       unawaited(windowManager.setFullScreen(false));
-    } else if (_mobile) {
+    } else if (_mobile || _television && Platform.isAndroid) {
       unawaited(
-        SystemChrome.setPreferredOrientations(DeviceOrientation.values),
+        (_orientationController?.releasePlayback(this) ??
+                SystemChrome.setPreferredOrientations(
+                  AppOrientationController.orientations(
+                    television: _television,
+                  ),
+                ))
+            .catchError((Object _) {}),
       );
-      unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
-    } else if (_television && Platform.isAndroid) {
       unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     }
     super.dispose();
@@ -1507,6 +1520,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             player: _player,
             title: title,
             enabled: !_loading && _error == null,
+            showOnPlaybackReady: _showControlsOnPlaybackReady,
             enhancement: _enhancementForUi,
             onTogglePlayback: _togglePlayback,
             onSeek: _seek,
@@ -1526,6 +1540,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             enhancement: _enhancementForUi,
             panelOpen: _panelOpen,
             fullscreen: _showFullscreen,
+            showOnPlaybackReady: _showControlsOnPlaybackReady,
             title: title,
             onTogglePlayback: _togglePlayback,
             swipeEnabled: _mobile,

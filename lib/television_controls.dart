@@ -19,6 +19,7 @@ class TelevisionControls extends StatefulWidget {
     required this.player,
     required this.title,
     required this.enabled,
+    required this.showOnPlaybackReady,
     required this.onTogglePlayback,
     required this.onSeek,
     required this.onPrevious,
@@ -32,6 +33,7 @@ class TelevisionControls extends StatefulWidget {
   final Player player;
   final String title;
   final bool enabled;
+  final bool showOnPlaybackReady;
   final VoidCallback onTogglePlayback;
   final ValueChanged<int> onSeek;
   final VoidCallback? onPrevious;
@@ -63,6 +65,7 @@ class _TelevisionControlsState extends State<TelevisionControls> {
   @override
   void initState() {
     super.initState();
+    _visible = widget.showOnPlaybackReady;
     for (final stream in [
       widget.player.stream.position,
       widget.player.stream.duration,
@@ -87,14 +90,27 @@ class _TelevisionControlsState extends State<TelevisionControls> {
         }
       }),
     );
-    if (widget.enabled) _show();
+    if (widget.enabled) {
+      if (widget.showOnPlaybackReady || !widget.player.state.playing) {
+        _show();
+      } else {
+        _visible = false;
+        _focus(_surface);
+      }
+    }
   }
 
   @override
   void didUpdateWidget(covariant TelevisionControls oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.enabled && !oldWidget.enabled) {
-      _show();
+      if (widget.showOnPlaybackReady || !widget.player.state.playing) {
+        _show();
+      } else {
+        setState(() => _visible = false);
+        _hideTimer?.cancel();
+        _focus(_surface);
+      }
     } else if (!widget.enabled) {
       _hideTimer?.cancel();
     }
